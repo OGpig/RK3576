@@ -178,9 +178,11 @@ RKDesk/
 │  ├─ S49weston              # 修复后的 Weston init（停止逻辑）
 │  ├─ S99rkdesk              # 抓屏服务
 │  ├─ 99-rkdesk-rotate.ini   # DSI rotate-90 → 1280×800 横向
-│  └─ weston                 # wet_main 启动器，安装到 /usr/bin/weston
+│  ├─ weston                 # wet_main 启动器，安装到 /usr/bin/weston
+│  └─ BOARD_FILES.md         # 板端路径与仓库来源对照
 ├─ tools/
 │  ├─ verify_env.py          # mlsys IDE 实验环境校验
+│  ├─ verify_board.sh        # 板上脚本与仓库 MD5 校验
 │  ├─ ws_bench.js            # 帧率/带宽压测
 │  ├─ cdp_shot.js            # 无头浏览器截图
 │  ├─ drm_capture.py         # 独立抓帧脚本
@@ -191,6 +193,7 @@ RKDesk/
    ├─ browser-live.png       # 浏览器事件链路输入验证
    ├─ screen.jpg             # 真实桌面原图（1280×800）
    ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
+   ├─ board-sync.txt         # 17/17 板端脚本校验结果
    ├─ env-report.txt
    └─ mlsys-ide-setup.md
 ```

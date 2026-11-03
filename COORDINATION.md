@@ -11,7 +11,6 @@
 | --- | --- | --- |
 | `RKDesk/` | 本目录 | **主力**：真实屏幕镜像 + 绝对鼠标/键盘，端口 **8088** |
 | `RKDesk/ --mode virtual` | 同上 | 兜底：板端自绘桌面 + PTY，不需要 Weston |
-| `recovery/` | 本地资料 | 1.1 GB 开发资料 RAR，已 `.gitignore`，不要提交 |
 
 旧 `Visualisation/` 已删除（历史在 Git）；板端 `/tmp/board_agent.py` 重启后不再存在。
 
@@ -89,7 +88,7 @@ git fetch origin && git reset --soft origin/main
 
 - 开工前先 `git fetch origin`；没有未提交修改时可 `git reset --soft origin/main` 对齐。
 - 不要 `git push --force`；API 脚本更新 ref 时使用 `force: false`。
-- 大文件（`recovery/*.rar`、`node_modules/`、`__pycache__/`）已在 `.gitignore`。
+- 大文件（`*.rar`、`node_modules/`、`__pycache__/`）已在 `.gitignore`；厂商资料 RAR 已删除。
 
 ## 待办
 

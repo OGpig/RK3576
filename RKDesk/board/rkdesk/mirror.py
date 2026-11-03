@@ -99,9 +99,7 @@ class MirrorSource:
         self.input = InputClient(input_socket)
         self.device = device
         if start_weston and not os.path.exists("/var/run/wayland-0"):
-            print("[rkdesk] starting weston")
-            subprocess.run(["/etc/init.d/S49weston", "start"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            self._ensure_weston()
         self.capture = self._open_capture(device)
         self.width, self.height = self.capture.width, self.capture.height
         self.rotation = 0
@@ -110,6 +108,41 @@ class MirrorSource:
         self._update_geometry(force=True)
         self.input.set_geometry(self.width, self.height)
         print(f"[rkdesk] mirror {self.width}x{self.height} rotation={self.rotation}")
+
+    @staticmethod
+    def _weston_process_running() -> bool:
+        try:
+            output = subprocess.check_output(["ps", "-eo", "args"],
+                                             stderr=subprocess.DEVNULL, timeout=2).decode("utf-8", "replace")
+            return "python3 /usr/bin/weston" in output
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    @staticmethod
+    def _wait_for_socket(timeout: float = 8.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if os.path.exists("/var/run/wayland-0"):
+                return True
+            time.sleep(0.2)
+        return False
+
+    def _ensure_weston(self) -> None:
+        # At boot S49weston starts in parallel with this service.  Wait for it
+        # instead of spawning a second compositor on the same DRM device.
+        if self._weston_process_running():
+            print("[rkdesk] waiting for the existing weston", flush=True)
+            if self._wait_for_socket(8.0):
+                return
+            print("[rkdesk] weston socket timeout, restarting", flush=True)
+            subprocess.run(["/etc/init.d/S49weston", "restart"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+            self._wait_for_socket(6.0)
+            return
+        print("[rkdesk] starting weston", flush=True)
+        subprocess.run(["/etc/init.d/S49weston", "start"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        self._wait_for_socket(8.0)
 
     @staticmethod
     def _open_capture(device: str) -> DrmCapture:

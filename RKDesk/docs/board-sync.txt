@@ -1,0 +1,19 @@
+[verify] target: root@192.168.31.153
+OK   /opt/rkdesk/rkdesk/desktop.py
+OK   /etc/init.d/S99rkdesk
+OK   /etc/init.d/S49weston
+OK   /opt/rkdesk/rkdesk/server.py
+OK   /usr/bin/weston
+OK   /opt/rkdesk/web/app.js
+OK   /etc/xdg/weston/weston.ini.d/99-rkdesk-rotate.ini
+OK   /opt/rkdesk/rkdesk/__init__.py
+OK   /opt/rkdesk/rkdesk/mirror.py
+OK   /opt/rkdesk/rkdesk/input.py
+OK   /opt/rkdesk/rkdesk_server.py
+OK   /opt/rkdesk/web/index.html
+OK   /opt/rkdesk/web/styles.css
+OK   /opt/rkdesk/rkdesk/terminal.py
+OK   /opt/rkdesk/rkdesk_input.py
+OK   /opt/rkdesk/rkdesk/drm.py
+OK   /etc/init.d/S48rkdesk-input
+[verify] 17/17 match
