@@ -1,26 +1,37 @@
 (function () {
   "use strict";
 
-  const canvas = document.getElementById("screen");
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("screen");
   const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
-  const stage = document.getElementById("stage");
-  const overlay = document.getElementById("overlay");
-  const overlayTitle = document.getElementById("overlay-title");
-  const overlayText = document.getElementById("overlay-text");
-  const dot = document.getElementById("dot");
-  const stateText = document.getElementById("state");
-  const latencyText = document.getElementById("latency");
-  const fpsText = document.getElementById("fps");
-  const bandwidthText = document.getElementById("bandwidth");
-  const qualitySelect = document.getElementById("quality");
-  const kbd = document.getElementById("kbd");
+  const stage = $("stage");
+  const viewport = $("viewport");
+  const overlay = $("overlay");
+  const overlayTitle = $("overlay-title");
+  const overlayText = $("overlay-text");
+  const dot = $("dot");
+  const stateText = $("state");
+  const latencyText = $("latency");
+  const fpsText = $("fps");
+  const bandwidthText = $("bandwidth");
+  const qualitySelect = $("quality");
+  const kbd = $("kbd");
+
+  const info = {
+    mode: $("infoMode"), res: $("infoRes"), host: $("infoHost"), ip: $("infoIp"),
+    uptime: $("infoUptime"), disk: $("infoDisk"), cpu: $("infoCpu"), mem: $("infoMem"),
+    temp: $("infoTemp"), bandwidth: $("infoBandwidth"), latency: $("infoLatency"),
+    fps: $("infoFps"), quality: $("infoQuality")
+  };
 
   let socket = null;
   let connected = false;
   let attempts = 0;
   let reconnectTimer = null;
+  let latencyTimer = null;
   let serverWidth = 1280;
   let serverHeight = 800;
+  let isMirror = true;
 
   let pendingFrame = null;
   let decoding = false;
@@ -28,13 +39,15 @@
   let lastFpsAt = performance.now();
   let byteCount = 0;
   let lastBytesAt = performance.now();
-  let latencyTimer = null;
+  let currentFps = 0;
+  let currentKbps = 0;
 
   let pendingMove = null;
   let moveScheduled = false;
 
   let composing = false;
   let ignoreInputUntil = 0;
+  let zoomMode = "fit";
 
   const SPECIAL = new Set([
     "Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft",
@@ -42,12 +55,21 @@
     "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"
   ]);
 
-  // ------------------------------------------------------------------ frames
+  // ------------------------------------------------------------------ layout
   function fitCanvas() {
-    const rect = stage.getBoundingClientRect();
-    const availableW = Math.max(120, rect.width - 20);
-    const availableH = Math.max(120, rect.height - 20);
-    const scale = Math.min(availableW / canvas.width, availableH / canvas.height);
+    const style = window.getComputedStyle(viewport);
+    const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+    const availableW = Math.max(160, viewport.clientWidth - padX - 14);
+    const availableH = Math.max(120, viewport.clientHeight - padY - 14);
+    viewport.classList.toggle("actual", zoomMode === "actual");
+
+    if (zoomMode === "actual") {
+      canvas.style.width = canvas.width + "px";
+      canvas.style.height = canvas.height + "px";
+      return;
+    }
+    const scale = Math.min(availableW / Math.max(1, canvas.width), availableH / Math.max(1, canvas.height));
     canvas.style.width = Math.round(canvas.width * scale) + "px";
     canvas.style.height = Math.round(canvas.height * scale) + "px";
   }
@@ -58,8 +80,17 @@
       canvas.height = height;
       fitCanvas();
     }
+    info.res.textContent = width + "×" + height;
   }
 
+  function setZoom(mode) {
+    zoomMode = mode;
+    $("fit").classList.toggle("active", mode === "fit");
+    $("actual").classList.toggle("active", mode === "actual");
+    fitCanvas();
+  }
+
+  // ------------------------------------------------------------------ frames
   async function decodeFrame(buffer) {
     if (decoding) {
       pendingFrame = buffer;
@@ -96,7 +127,7 @@
       frameCount += 1;
       byteCount += buffer.byteLength;
     } catch (error) {
-      // A corrupt frame is harmless; the next one replaces it.
+      // Corrupt frame: drop it, the next one replaces it.
     } finally {
       decoding = false;
       if (pendingFrame) {
@@ -124,7 +155,7 @@
     overlayTitle.textContent = title;
     overlayText.textContent = text;
     overlay.classList.remove("hidden");
-    document.getElementById("retry").style.display = retryVisible ? "" : "none";
+    $("retry").style.display = retryVisible ? "" : "none";
   }
 
   function hideOverlay() {
@@ -145,10 +176,7 @@
     socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
 
-    socket.onopen = () => {
-      attempts = 0;
-      setStatus("warn", "握手中…");
-    };
+    socket.onopen = () => setStatus("warn", "握手中…");
 
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
@@ -160,17 +188,19 @@
           setFrameSize(serverWidth, serverHeight);
           fitCanvas();
           hideOverlay();
-          const mirror = message.mode === "mirror";
-          document.body.classList.toggle("mirror", mirror);
-          setStatus("online", "已连接 · " + serverWidth + "×" + serverHeight + (mirror ? " · 真实屏幕" : ""));
+          isMirror = message.mode === "mirror";
+          document.body.classList.toggle("mirror", isMirror);
+          info.mode.textContent = isMirror ? "真实屏幕镜像" : "虚拟桌面";
+          if (message.host) info.host.textContent = message.host;
+          if (message.ip) info.ip.textContent = message.ip;
+          setStatus("online", "已连接 · " + serverWidth + "×" + serverHeight + (isMirror ? " · 真实屏幕" : ""));
           startLatency();
         } else if (message.t === "pong") {
           const rtt = performance.now() - message.ts;
           latencyText.textContent = rtt.toFixed(0) + " ms";
+          info.latency.textContent = rtt.toFixed(0) + " ms";
         } else if (message.t === "stats") {
-          if (!connected) {
-            setStatus("online", "已连接");
-          }
+          updateStats(message);
         }
         return;
       }
@@ -187,22 +217,36 @@
       reconnectTimer = setTimeout(connect, delay * 1000);
     };
 
-    socket.onerror = () => {
-      setStatus("offline", "连接失败");
-    };
+    socket.onerror = () => setStatus("offline", "连接失败");
   }
 
   function startLatency() {
     stopLatency();
-    latencyTimer = setInterval(() => {
-      send({ t: "ping", ts: performance.now() });
-    }, 2000);
+    latencyTimer = setInterval(() => send({ t: "ping", ts: performance.now() }), 2000);
     send({ t: "ping", ts: performance.now() });
   }
 
   function stopLatency() {
     clearInterval(latencyTimer);
     latencyTimer = null;
+  }
+
+  function updateStats(message) {
+    const cpu = Number(message.cpu || 0);
+    const mem = Number(message.mem || 0);
+    const temp = Number(message.temp || 0);
+    $("cpuBar").style.width = Math.min(100, cpu) + "%";
+    $("memBar").style.width = Math.min(100, mem) + "%";
+    $("tempBar").style.width = Math.min(100, temp / 90 * 100) + "%";
+    info.cpu.textContent = cpu.toFixed(0) + "%";
+    info.mem.textContent = mem.toFixed(0) + "%";
+    info.temp.textContent = temp.toFixed(0) + " °C";
+    if (message.uptime) info.uptime.textContent = message.uptime;
+    if (message.disk_used !== undefined) {
+      info.disk.textContent = message.disk_used + " / " + message.disk_total + " GB";
+    }
+    if (message.host) info.host.textContent = message.host;
+    if (message.ip) info.ip.textContent = message.ip;
   }
 
   // ------------------------------------------------------------------- mouse
@@ -237,9 +281,7 @@
     send({ t: "down", x: position.x, y: position.y, b: event.button });
   });
 
-  canvas.addEventListener("pointermove", (event) => {
-    queueMove(toServer(event));
-  });
+  canvas.addEventListener("pointermove", (event) => queueMove(toServer(event)));
 
   canvas.addEventListener("pointerup", (event) => {
     event.preventDefault();
@@ -260,21 +302,15 @@
 
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   canvas.addEventListener("dblclick", (event) => event.preventDefault());
-
-  // ---------------------------------------------------------------- keyboard
   canvas.addEventListener("pointerdown", () => {
     setTimeout(() => kbd.focus({ preventScroll: true }), 0);
   });
 
+  // ---------------------------------------------------------------- keyboard
   function sendKey(event) {
     send({
-      t: "key",
-      key: event.key,
-      code: event.code,
-      ctrl: event.ctrlKey,
-      alt: event.altKey,
-      shift: event.shiftKey,
-      meta: event.metaKey
+      t: "key", key: event.key, code: event.code,
+      ctrl: event.ctrlKey, alt: event.altKey, shift: event.shiftKey, meta: event.metaKey
     });
   }
 
@@ -282,9 +318,6 @@
     if (event.isComposing) return;
     const modifier = event.ctrlKey || event.altKey || event.metaKey;
     if (SPECIAL.has(event.key) || modifier) {
-      if (event.key === "Tab" && !modifier) {
-        // Tab is meaningful inside the terminal, not for page navigation.
-      }
       sendKey(event);
       event.preventDefault();
     }
@@ -317,39 +350,55 @@
     if (text) send({ t: "paste", text: text });
   });
 
-  // ---------------------------------------------------------------- toolbar
+  // ------------------------------------------------------------------ toolbar
   qualitySelect.addEventListener("change", () => {
     const value = Number(qualitySelect.value);
     localStorage.setItem("rkdesk.quality", String(value));
+    info.quality.textContent = String(value);
     send({ t: "quality", value: value });
   });
   const savedQuality = localStorage.getItem("rkdesk.quality");
   if (savedQuality && qualitySelect.querySelector('option[value="' + savedQuality + '"]')) {
     qualitySelect.value = savedQuality;
+    info.quality.textContent = savedQuality;
   }
 
-  document.getElementById("retry").addEventListener("click", () => {
-    attempts = 0;
-    connect();
+  $("fit").addEventListener("click", () => setZoom("fit"));
+  $("actual").addEventListener("click", () => setZoom("actual"));
+
+  $("panelToggle").addEventListener("click", () => {
+    document.body.classList.toggle("panel-open");
+    setTimeout(fitCanvas, 320);
+  });
+  $("panelClose").addEventListener("click", () => {
+    document.body.classList.remove("panel-open");
+    setTimeout(fitCanvas, 320);
   });
 
-  document.getElementById("restart").addEventListener("click", () => {
-    attempts = 0;
-    connect();
-  });
+  $("retry").addEventListener("click", () => { attempts = 0; connect(); });
+  $("restart").addEventListener("click", () => { attempts = 0; connect(); });
 
-  document.getElementById("full").addEventListener("click", async () => {
+  $("full").addEventListener("click", async () => {
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await document.documentElement.requestFullscreen();
-      }
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
     } catch (error) { /* ignore */ }
-    setTimeout(fitCanvas, 120);
+    setTimeout(fitCanvas, 140);
   });
 
-  document.getElementById("paste").addEventListener("click", async () => {
+  $("shot").addEventListener("click", () => {
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const link = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      link.download = "rk3576-" + stamp + ".png";
+      link.href = URL.createObjectURL(blob);
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+    }, "image/png");
+  });
+
+  $("paste").addEventListener("click", async () => {
     let text = "";
     try {
       text = await navigator.clipboard.readText();
@@ -359,19 +408,23 @@
     if (text) send({ t: "paste", text: text });
   });
 
-  document.addEventListener("fullscreenchange", () => setTimeout(fitCanvas, 80));
+  document.addEventListener("fullscreenchange", () => setTimeout(fitCanvas, 90));
   window.addEventListener("resize", fitCanvas);
-  if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe(stage);
+  if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe(viewport);
 
+  // -------------------------------------------------------------------- stats
   setInterval(() => {
     const now = performance.now();
-    const fps = frameCount * 1000 / Math.max(1, now - lastFpsAt);
-    fpsText.textContent = fps < 0.5 ? "静止" : fps.toFixed(0) + " fps";
+    currentFps = frameCount * 1000 / Math.max(1, now - lastFpsAt);
+    currentKbps = byteCount / 1024 / Math.max(0.2, (now - lastBytesAt) / 1000);
+    const fpsLabel = currentFps < 0.5 ? "静止" : currentFps.toFixed(0) + " fps";
+    fpsText.textContent = fpsLabel;
+    info.fps.textContent = fpsLabel;
+    bandwidthText.textContent = currentKbps.toFixed(0) + " KB/s";
+    info.bandwidth.textContent = currentKbps.toFixed(0) + " KB/s";
     frameCount = 0;
-    lastFpsAt = now;
-    const kbps = byteCount / 1024 / Math.max(0.2, (now - lastBytesAt) / 1000);
-    bandwidthText.textContent = kbps.toFixed(0) + " KB/s";
     byteCount = 0;
+    lastFpsAt = now;
     lastBytesAt = now;
   }, 1000);
 

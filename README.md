@@ -1,6 +1,6 @@
 # RK3576 开发板真实屏幕远程工作台
 
-把 **TL3576-EVM（RK3576）的 HDMI / DSI 实际输出**镜像到本机浏览器，并用本机鼠标键盘
+把 **TL3576-MiniEVM（RK3576）的 HDMI / DSI 实际输出**镜像到本机浏览器，并用本机鼠标键盘
 直接操作板端桌面。画面来自 DRM/KMS 扫描缓冲区，不是自绘 UI；输入通过 uinput 注入
 Weston，效果等同于给板子接了一台远程显示器 + 键鼠。
 
@@ -36,10 +36,10 @@ ssh rk3576
 ## 关键事实
 
 ```text
-Board      : TL3576-EVM / RK3576-Tronlong
+Board      : TL3576-MiniEVM / RK3576-Tronlong
 OS         : Buildroot 2024.02
 Kernel     : Linux 6.1.115-rt16 (aarch64)
-Display    : DSI-1 800x1280（HDMI 未接；接上 HDMI 自动 1920x1080）
+Display    : DSI-1 逻辑 1280x800（原生 800x1280，Weston rotate-90；HDMI 未接，接入自动 1920x1080）
 Memory     : 1.9 GiB visible + 2 GiB swapfile
 Storage    : 29.1 GB eMMC（rootfs 9.9 GB，4.6 GB 可用）
 Python     : 3.11.8, numpy, OpenCV, Pillow, onnxruntime, torch, rknnlite/rknn

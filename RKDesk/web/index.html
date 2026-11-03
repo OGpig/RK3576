@@ -7,54 +7,127 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header class="bar">
+  <header class="topbar">
     <div class="brand">
-      <span class="logo">R</span>
-      <div>
-        <h1>RK3576 Remote Workbench</h1>
-        <p>真实 HDMI/DSI 画面镜像 · WebSocket 推流 · 鼠标键盘回传</p>
+      <div class="logo">R</div>
+      <div class="brand-text">
+        <h1>RK3576 <em>Remote Workbench</em></h1>
+        <p>真实 HDMI / DSI 画面镜像</p>
       </div>
     </div>
-    <div class="status">
-      <span id="dot" class="dot offline"></span>
-      <span id="state">连接中…</span>
-      <span class="sep"></span>
-      <span id="latency">-- ms</span>
-      <span id="fps">-- fps</span>
-      <span class="sep"></span>
-      <label class="quality">画质
-        <select id="quality">
-          <option value="45">流畅</option>
-          <option value="60">均衡</option>
-          <option value="78" selected>清晰</option>
-          <option value="78">清晰</option>
-          <option value="90">原画</option>
-        </select>
-      </label>
-      <button id="paste" title="把本机剪贴板文本粘贴到板端终端">粘贴</button>
-      <button id="restart" title="重新连接">重连</button>
-      <button id="full" title="全屏">全屏</button>
+
+    <div class="top-status">
+      <div class="live" id="live">
+        <span id="dot" class="dot offline"></span>
+        <span id="state">连接中…</span>
+      </div>
+      <div class="metric">
+        <span class="label">延迟</span>
+        <span id="latency" class="value">-- ms</span>
+      </div>
+      <div class="metric">
+        <span class="label">帧率</span>
+        <span id="fps" class="value">--</span>
+      </div>
+      <div class="top-actions">
+        <button id="panelToggle" class="icon-btn" title="板端信息">信息</button>
+        <button id="restart" class="icon-btn" title="重新连接">重连</button>
+      </div>
     </div>
   </header>
 
   <main id="stage">
-    <canvas id="screen" width="1280" height="800" tabindex="0"></canvas>
+    <div id="viewport">
+      <div id="canvasWrap" class="canvas-wrap">
+        <canvas id="screen" width="1280" height="800" tabindex="0"></canvas>
+        <div class="screen-shine"></div>
+      </div>
+    </div>
+
+    <aside id="panel">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <div>
+            <h2>板端状态</h2>
+            <p id="infoMode">真实屏幕镜像</p>
+          </div>
+          <button id="panelClose" class="icon-btn" title="关闭">×</button>
+        </div>
+
+        <div class="panel-hero">
+          <span id="infoRes">1280×800</span>
+          <small>当前输出 · 实时镜像</small>
+        </div>
+
+        <div class="info-grid">
+          <div><label>主机</label><b id="infoHost">--</b></div>
+          <div><label>地址</label><b id="infoIp">--</b></div>
+          <div><label>运行</label><b id="infoUptime">--</b></div>
+          <div><label>磁盘</label><b id="infoDisk">--</b></div>
+        </div>
+
+        <div class="bar-row">
+          <div class="bar-label"><span>CPU</span><span id="infoCpu">--</span></div>
+          <div class="bar"><i id="cpuBar"></i></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label"><span>内存</span><span id="infoMem">--</span></div>
+          <div class="bar mem"><i id="memBar"></i></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-label"><span>温度</span><span id="infoTemp">--</span></div>
+          <div class="bar temp"><i id="tempBar"></i></div>
+        </div>
+
+        <div class="panel-stats">
+          <div><span>带宽</span><b id="infoBandwidth">0 KB/s</b></div>
+          <div><span>延迟</span><b id="infoLatency">-- ms</b></div>
+          <div><span>帧率</span><b id="infoFps">--</b></div>
+          <div><span>画质</span><b id="infoQuality">78</b></div>
+        </div>
+
+        <p class="panel-note">
+          画面来自 DRM/KMS 扫描输出；鼠标与键盘通过 uinput 注入 Weston，
+          重启 Web 服务不会关闭板端窗口。
+        </p>
+      </div>
+    </aside>
+
     <div id="overlay" class="overlay">
-      <div class="card">
+      <div class="overlay-card">
         <div class="spinner"></div>
         <h2 id="overlay-title">正在连接开发板</h2>
         <p id="overlay-text">192.168.31.153 · 等待板端画面</p>
         <button id="retry">立即重试</button>
       </div>
     </div>
+
+    <div class="dock">
+      <button id="fit" class="dock-btn active" title="适应窗口">适应</button>
+      <button id="actual" class="dock-btn" title="1:1 原始像素">1:1</button>
+      <span class="dock-sep"></span>
+      <label class="dock-quality">画质
+        <select id="quality">
+          <option value="45">流畅</option>
+          <option value="60">均衡</option>
+          <option value="78" selected>清晰</option>
+          <option value="86">精细</option>
+          <option value="92">原画</option>
+        </select>
+      </label>
+      <span class="dock-sep"></span>
+      <button id="shot" class="dock-btn" title="保存当前画面">截图</button>
+      <button id="paste" class="dock-btn" title="把本机剪贴板文本粘贴到板端">粘贴</button>
+      <button id="full" class="dock-btn" title="全屏">全屏</button>
+    </div>
   </main>
 
-  <footer class="hint">
-    <span>画面来自板端真实扫描输出</span>
-    <span>点击画面后直接键盘输入</span>
-    <span>鼠标 / 滚轮 / 右键可用</span>
-    <span>Ctrl+C / Ctrl+D 等组合键有效</span>
-    <span id="bandwidth"></span>
+  <footer class="hintbar">
+    <span class="hint-live"><i></i> LIVE</span>
+    <span>点击画面后键盘可用</span>
+    <span>滚轮 / 右键 / 拖动</span>
+    <span>Ctrl+C · Ctrl+D 等组合键</span>
+    <span id="bandwidth">0 KB/s</span>
   </footer>
 
   <textarea id="kbd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>

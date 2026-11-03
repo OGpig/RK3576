@@ -16,11 +16,13 @@ tar -C "$ROOT/board" -cf - rkdesk rkdesk_server.py rkdesk_input.py \
 tar -C "$ROOT" -cf - web \
     | ssh "$HOST" "tar -xf - -C /opt/rkdesk && chmod -R a+rX /opt/rkdesk"
 
-tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S49weston deploy/S99rkdesk deploy/weston \
+tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S49weston deploy/S99rkdesk deploy/weston deploy/99-rkdesk-rotate.ini \
     | ssh "$HOST" "
         tar -xf - -C /tmp &&
         mv /tmp/deploy/S48rkdesk-input /etc/init.d/S48rkdesk-input &&
         mv /tmp/deploy/S99rkdesk /etc/init.d/S99rkdesk &&
+        mkdir -p /etc/xdg/weston/weston.ini.d &&
+        install -m 644 /tmp/deploy/99-rkdesk-rotate.ini /etc/xdg/weston/weston.ini.d/99-rkdesk-rotate.ini &&
         if ! grep -q wet_main /usr/bin/weston 2>/dev/null; then
             cp -a /usr/bin/weston /usr/bin/weston.orig.\$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
         fi &&

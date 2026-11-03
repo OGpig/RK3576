@@ -297,7 +297,10 @@ class App:
                 self._broadcast_text(json.dumps({
                     "t": "stats", "cpu": round(cpu, 1), "mem": round(mem_pct, 1),
                     "temp": round(temp, 1), "clients": len(self.clients),
-                    "fps": round(self.fps, 1),
+                    "fps": round(self.fps, 1), "uptime": uptime,
+                    "disk_used": round(total_gb - free_gb, 1),
+                    "disk_total": round(total_gb, 1),
+                    "ip": ip, "host": socket.gethostname(),
                 }, separators=(",", ":")))
             except Exception:
                 traceback.print_exc()
@@ -367,7 +370,8 @@ class App:
             "t": "hello", "version": VERSION, "width": int(self.width * self.scale),
             "height": int(self.height * self.scale), "fps": self.target_fps,
             "quality": self.quality, "shell": self.desktop.shell_alive,
-            "mode": self.mode,
+            "mode": self.mode, "host": self.desktop.stats.get("host", ""),
+            "ip": self.desktop.stats.get("ip", ""),
         }, separators=(",", ":")))
         with self.frame_lock:
             if self.latest_jpeg:
@@ -475,9 +479,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/debug":
             with APP.desktop.lock:
+                mirror = None
+                if APP.mirror:
+                    mirror = {
+                        "rotation": APP.mirror.rotation,
+                        "display": [APP.mirror.width, APP.mirror.height],
+                        "input_connected": APP.mirror.input.sock is not None,
+                    }
                 self._json({
                     "mode": APP.mode,
                     "display": [APP.width, APP.height],
+                    "mirror": mirror,
                     "terminal": [APP.desktop.term.cols, APP.desktop.term.rows],
                     "focus": APP.desktop.focus.kind if APP.desktop.focus else None,
                     "drag": APP.desktop.drag[1] if APP.desktop.drag else None,

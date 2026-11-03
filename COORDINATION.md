@@ -18,7 +18,8 @@
 
 - `S48rkdesk-input` → `rkdesk_input.py`：创建 `RKDesk AbsMouse` / `RKDesk Keyboard`，
   **必须早于 Weston 启动**（Weston 只在启动时枚举输入设备）。
-- `S49weston` → Weston 14.0.1（DRM/GBM），DSI-1 800×1280，HDMI 接入后自动切 1920×1080。
+- `S49weston` → Weston 14.0.1（DRM/GBM），DSI-1 原生 800×1280，`rotate-90` 后逻辑
+  1280×800 横向；HDMI 接入后自动 1920×1080。
 - `S99rkdesk` → `rkdesk_server.py`，端口 8088，抓屏 + WebSocket。
 - `8765`：旧 `board_agent.py`，仍在跑，画面全黑；停止前请确认对方不再使用。
 
