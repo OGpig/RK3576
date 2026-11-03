@@ -1,0 +1,22 @@
+# Large vendor package / downloaded docs
+recovery/
+*.rar
+*.7z
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Runtime
+*.log
+*.pid
+debug_frame.jpg
+.edge-profile*/
+.edgetmp/
+
+# WorkBuddy workspace metadata
+.workbuddy/

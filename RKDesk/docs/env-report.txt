@@ -1,0 +1,58 @@
+====================================================================
+ RK3576 environment verification (mlsysbook ide-setup)
+====================================================================
+time       : 2026-11-03 14:00:19 CST
+host       : RK3576-Tronlong
+kernel     : 6.1.115-rt16-03139-g916039f24146
+machine    : aarch64
+buildroot  : Buildroot 2024.02
+uptime     : 20087.16 s
+cpu        : TL3576-MiniEVM × 8
+memory     : 1954 MiB total, 1752 MiB available
+rootfs     : 9.8 GiB total, 4.5 GiB free
+--------------------------------------------------------------------
+ Python
+  version  : 3.11.8
+  binary   : /usr/bin/python3
+  numpy        1.26.4             数值计算
+  cv2          5.0.0              OpenCV 计算机视觉
+  PIL          13.0.0             Pillow 图像处理
+  onnxruntime  1.31.0             ONNX Runtime
+  torch        2.2.0              PyTorch
+  rknnlite     installed          RKNN Lite (NPU 推理)
+  rknn         installed          RKNN Toolkit
+  psutil       7.2.2              系统信息
+  requests     2.31.0             HTTP 客户端
+  flask        MISSING            Web 框架
+--------------------------------------------------------------------
+ Devices
+  /dev/fb0                   yes  framebuffer
+  /dev/dri/card0             yes  DRM display
+  /dev/dri/renderD128        yes  GPU render node
+  /dev/uinput                yes  virtual input injection
+  /dev/video-camera0         yes  camera pipeline
+  /dev/snd/controlC0         yes  audio control
+--------------------------------------------------------------------
+ Camera / audio inventory
+  (no output)
+  /dev/video* nodes: 36
+--------------------------------------------------------------------
+ Network / services
+  address  : 192.168.31.153
+  route    : eth0	00000000	011FA8C0	0003	0	0	1003	00000000	0	0	0                                                                            
+  sshd     : OpenSSH_9.6p1, OpenSSL 3.2.1 30 Jan 2024
+--------------------------------------------------------------------
+ RKDesk remote desktop
+  http://<board>:8088  OK  1280x800  clients=1  shell=True
+--------------------------------------------------------------------
+ IDE-setup checklist
+  [PASS] SSH login          root@192.168.31.153
+  [PASS] Python >= 3.8      3.11.8
+  [PASS] OpenCV             import cv2
+  [PASS] NumPy              import numpy
+  [INFO] Display output     no physical HDMI/DSI panel attached; use RKDesk
+  [INFO] Camera             no sensor attached; /dev/video nodes exist but no capture source
+  [INFO] Audio              no speaker/headphone; codec devices exist
+  [INFO] Git on board       not installed; use Git on the development computer
+====================================================================
+summary: 17 passed, 1 warnings

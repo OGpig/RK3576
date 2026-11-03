@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>RK3576 Remote Workbench</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <span class="logo">R</span>
+      <div>
+        <h1>RK3576 Remote Workbench</h1>
+        <p>板端渲染 · WebSocket 推流 · 鼠标键盘回传</p>
+      </div>
+    </div>
+    <div class="status">
+      <span id="dot" class="dot offline"></span>
+      <span id="state">连接中…</span>
+      <span class="sep"></span>
+      <span id="latency">-- ms</span>
+      <span id="fps">-- fps</span>
+      <span class="sep"></span>
+      <label class="quality">画质
+        <select id="quality">
+          <option value="45">流畅</option>
+          <option value="60">均衡</option>
+          <option value="64" selected>标准</option>
+          <option value="78">清晰</option>
+          <option value="90">原画</option>
+        </select>
+      </label>
+      <button id="paste" title="把本机剪贴板文本粘贴到板端终端">粘贴</button>
+      <button id="restart" title="重新连接">重连</button>
+      <button id="full" title="全屏">全屏</button>
+    </div>
+  </header>
+
+  <main id="stage">
+    <canvas id="screen" width="1280" height="800" tabindex="0"></canvas>
+    <div id="overlay" class="overlay">
+      <div class="card">
+        <div class="spinner"></div>
+        <h2 id="overlay-title">正在连接开发板</h2>
+        <p id="overlay-text">192.168.31.153 · 等待板端画面</p>
+        <button id="retry">立即重试</button>
+      </div>
+    </div>
+  </main>
+
+  <footer class="hint">
+    <span>点击画面后直接键盘输入</span>
+    <span>滚轮在终端内回看</span>
+    <span>双击标题栏最大化</span>
+    <span>Ctrl+C / Ctrl+D 等组合键有效</span>
+    <span id="bandwidth"></span>
+  </footer>
+
+  <textarea id="kbd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
+  <script src="/app.js"></script>
+</body>
+</html>

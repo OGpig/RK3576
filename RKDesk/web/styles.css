@@ -1,0 +1,174 @@
+:root {
+  --bg: #070b0f;
+  --panel: #0e161d;
+  --border: #22303c;
+  --text: #d6e2ec;
+  --dim: #7d8e9e;
+  --accent: #2fd4a7;
+  --danger: #ff5f57;
+  --warn: #febc2e;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.bar {
+  flex: 0 0 auto;
+  height: 58px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(180deg, #111b24, #0c141b);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+.logo {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  display: grid; place-items: center;
+  background: #123029;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.brand h1 { margin: 0; font-size: 15px; letter-spacing: .3px; white-space: nowrap; }
+.brand p { margin: 3px 0 0; font-size: 11px; color: var(--dim); white-space: nowrap; }
+
+.status { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 10px currentColor; }
+.dot.online { background: var(--accent); }
+.dot.offline { background: var(--danger); }
+
+.sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; }
+
+#fps, #latency { font-family: Consolas, "DejaVu Sans Mono", monospace; color: #9fb3c4; }
+
+.quality { display: flex; align-items: center; gap: 5px; }
+
+select, button {
+  background: #17232e;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover, select:hover { border-color: var(--accent); color: #fff; }
+button:active { transform: translateY(1px); }
+
+main {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(47, 212, 167, .06), transparent 55%),
+    #06090c;
+}
+
+canvas {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .55), 0 0 0 1px #1d2b37;
+  outline: none;
+  cursor: default;
+  touch-action: none;
+  image-rendering: auto;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 10, 14, .72);
+  backdrop-filter: blur(3px);
+  transition: opacity .18s ease;
+}
+
+.overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.card {
+  width: min(360px, 86vw);
+  padding: 26px 24px;
+  text-align: center;
+  background: #0d161e;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+
+.card h2 { margin: 16px 0 6px; font-size: 16px; }
+.card p { margin: 0; font-size: 12px; color: var(--dim); }
+.card button { margin-top: 18px; height: 32px; padding: 0 18px; }
+
+.spinner {
+  width: 30px; height: 30px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 2px solid #22313d;
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.hint {
+  flex: 0 0 auto;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  font-size: 11px;
+  color: #657888;
+  border-top: 1px solid var(--border);
+  background: #0a1117;
+  overflow: hidden;
+}
+
+.hint span::before { content: "· "; color: var(--accent); }
+.hint #bandwidth { margin-left: auto; font-family: Consolas, monospace; }
+
+#kbd {
+  position: fixed;
+  left: -1000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 900px) {
+  .brand p, #latency, .sep { display: none; }
+  .bar { height: 50px; padding: 0 10px; }
+  .brand h1 { font-size: 13px; }
+  .hint { display: none; }
+}

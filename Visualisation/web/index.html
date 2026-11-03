@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RK3576 Remote Console</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">REMOTE BOARD CONSOLE</p>
+        <h1>RK3576 远程控制台</h1>
+        <p class="subhead">通过局域网查看板端 UI，并直接转发鼠标和键盘操作。</p>
+      </div>
+      <div class="connection-badge"><span class="dot"></span><span id="connection-label">待连接</span></div>
+    </header>
+
+    <section class="layout">
+      <aside class="sidebar">
+        <section class="card board-card">
+          <div class="card-title"><span>设备</span><span class="chip">RK3576</span></div>
+          <div class="device-name">RK3576 开发板</div>
+          <div class="device-ip">192.168.31.153</div>
+          <div class="status-row"><span>链路</span><strong id="link-state">等待板端 VNC</strong></div>
+          <div class="status-row"><span>传输</span><strong>VNC / LAN</strong></div>
+          <button id="connect-btn" class="primary-btn">连接板端桌面</button>
+        </section>
+
+        <section class="card">
+          <div class="card-title"><span>控制</span><span class="hint">浏览器输入</span></div>
+          <label class="toggle-row"><span>鼠标事件</span><input id="mouse-toggle" type="checkbox" checked><i></i></label>
+          <label class="toggle-row"><span>键盘事件</span><input id="keyboard-toggle" type="checkbox" checked><i></i></label>
+          <label class="toggle-row"><span>自动适配窗口</span><input id="fit-toggle" type="checkbox" checked><i></i></label>
+        </section>
+
+        <section class="card checklist">
+          <div class="card-title"><span>开始前检查</span></div>
+          <div class="check-item"><span class="check pending">1</span><span>板端 Linux/Android 系统已启动</span></div>
+          <div class="check-item"><span class="check pending">2</span><span>板端 VNC 服务已开启</span></div>
+          <div class="check-item"><span class="check pending">3</span><span>主机与开发板处于同一局域网</span></div>
+          <p class="small-note">当前已确认 IP 可达、SSH 端口开放。还需要板端系统用户名和桌面/图形栈信息。</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <div class="viewer-toolbar">
+          <div class="toolbar-left">
+            <span class="live-indicator"><span class="dot"></span>LIVE VIEW</span>
+            <span id="resolution">未连接</span>
+          </div>
+          <div class="toolbar-actions">
+            <button id="fit-btn" class="icon-btn" title="适配窗口">适配</button>
+            <button id="fullscreen-btn" class="icon-btn" title="全屏">全屏</button>
+            <button id="refresh-btn" class="icon-btn" title="刷新画面">刷新</button>
+          </div>
+        </div>
+        <div id="viewer" class="viewer">
+          <div id="empty-state" class="empty-state">
+            <div class="monitor-icon"><span></span></div>
+            <h2>等待板端桌面</h2>
+            <p>连接后，这里将显示 RK3576 的 Weston 远程桌面。<br/>鼠标点击和键盘输入会通过网络转发到板端。</p>
+            <button id="empty-connect-btn" class="primary-btn">开始连接</button>
+            <div id="error-box" class="error-box" hidden></div>
+          </div>
+          <div id="stream-overlay" class="stream-overlay" hidden>
+            <span class="stream-live-dot"></span><span id="stream-label">板端画面流</span>
+          </div>
+          <div id="novnc-container" class="novnc-container" hidden></div>
+          <img id="board-frame" class="board-frame" alt="RK3576 板端画面" hidden />
+          <div class="viewer-grid"></div>
+        </div>
+        <div class="viewer-footer">
+          <span><span class="footer-dot"></span><span id="latency">延迟 -- ms</span></span>
+          <span id="quality-label">画质 自动</span>
+          <span>无显示屏模式 · 网络控制</span>
+        </div>
+      </section>
+    </section>
+
+    <section class="info-strip">
+      <div class="info-item"><span class="info-icon">↗</span><div><b>无显示屏开发</b><span>板端不需要连接 HDMI 显示器</span></div></div>
+      <div class="info-item"><span class="info-icon">⌁</span><div><b>局域网直连</b><span>当前目标 192.168.31.153 · Weston</span></div></div>
+      <div class="info-item"><span class="info-icon">⌨</span><div><b>输入转发</b><span>鼠标、键盘和全屏控制</span></div></div>
+      <div class="info-item"><span class="info-icon">!</span><div><b>低资源友好</b><span>不在板端运行重型桌面服务</span></div></div>
+    </section>
+
+    <footer>RK3576 Remote Console · MVP scaffold · 适用于板端 Linux + VNC/noVNC 桥接方案</footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
