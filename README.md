@@ -31,7 +31,8 @@ ssh rk3576
 | --- | --- | --- |
 | **RKDesk mirror** | ✅ 当前主力 | DRM 真实画面 + 绝对鼠标/键盘，端口 **8088** |
 | RKDesk virtual | 🧪 兜底 | `--mode virtual`，板端自绘桌面 + PTY，无 Weston 时可用 |
-| Visualisation | 🗄️ 旧 MVP | Node/noVNC 外壳 + 读 `/dev/fb0` 的 `board_agent.py`（全黑，端口 8765） |
+
+旧 `Visualisation/`（Node/noVNC + `board_agent.py` 旧 MVP）已删除，历史仍保留在 Git 中。
 
 ## 关键事实
 
@@ -58,5 +59,6 @@ SSH        : OpenSSH 9.6p1, root key login
 - `/usr/bin/weston` 原 ELF 曾被写坏；现已用 `libexec_weston.so` 的 `wet_main()`
   恢复为 Python 启动器，桌面/HDMI 输出正常。损坏文件备份在
   `/usr/bin/weston.damaged.20261103`，详见 `RKDesk/README.md`。
-- 旧 `board_agent.py` 仍在 8765 端口运行（画面全黑），可安全停止。
+- 旧 `board_agent.py` 不在仓库中；板端副本位于 `/tmp`，重启后自动消失。
+  若板子热重连后仍看到 8765 端口，可执行 `kill $(pgrep -f /tmp/board_agent.py)` 停掉。
 - 默认无认证，仅限局域网；跨网请用 SSH 隧道。

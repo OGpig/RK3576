@@ -14,12 +14,8 @@ __pycache__/
 # Runtime
 *.log
 *.pid
-debug_frame.jpg
 .edge-profile*/
 .edgetmp/
 
 # WorkBuddy workspace metadata
 .workbuddy/
-
-# Debug frames from the earlier MVP
-Visualisation/debug_frame*.jpg

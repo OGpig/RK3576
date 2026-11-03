@@ -184,7 +184,7 @@ RKDesk/
 │  ├─ ws_bench.js            # 帧率/带宽压测
 │  ├─ cdp_shot.js            # 无头浏览器截图
 │  ├─ drm_capture.py         # 独立抓帧脚本
-│  └─ virtual_input.py       # uinput 设备实验脚本
+│  └─ package.json           # 诊断脚本的 ws 依赖
 └─ docs/
    ├─ browser-mirror.png     # 浏览器中的真实桌面
    ├─ browser-panel.png      # 板端状态侧栏

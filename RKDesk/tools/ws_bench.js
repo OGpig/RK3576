@@ -5,7 +5,7 @@ let WebSocket;
 try {
   WebSocket = require("ws");
 } catch (error) {
-  WebSocket = require(path.join(__dirname, "../../Visualisation/node_modules/ws"));
+  WebSocket = require(path.join(__dirname, "../node_modules/ws"));
 }
 
 const url = process.argv[2] || "ws://192.168.31.153:8088/ws";

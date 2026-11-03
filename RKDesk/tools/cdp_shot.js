@@ -9,7 +9,7 @@ let WebSocket;
 try {
   WebSocket = require("ws");
 } catch (error) {
-  WebSocket = require(path.join(__dirname, "../../Visualisation/node_modules/ws"));
+  WebSocket = require(path.join(__dirname, "../node_modules/ws"));
 }
 
 const output = process.argv[2] || "docs/browser.png";

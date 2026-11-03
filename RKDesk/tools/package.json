@@ -1,0 +1,8 @@
+{
+  "name": "rkdesk-tools",
+  "private": true,
+  "description": "Diagnostic scripts for RKDesk (WebSocket client)",
+  "dependencies": {
+    "ws": "^8.22.1"
+  }
+}

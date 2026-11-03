@@ -11,8 +11,9 @@
 | --- | --- | --- |
 | `RKDesk/` | 本目录 | **主力**：真实屏幕镜像 + 绝对鼠标/键盘，端口 **8088** |
 | `RKDesk/ --mode virtual` | 同上 | 兜底：板端自绘桌面 + PTY，不需要 Weston |
-| `Visualisation/` | 旧 MVP | Node/Express + noVNC 外壳 + 读 `/dev/fb0` 的 `board_agent.py`，端口 **8765** |
 | `recovery/` | 本地资料 | 1.1 GB 开发资料 RAR，已 `.gitignore`，不要提交 |
+
+旧 `Visualisation/` 已删除（历史在 Git）；板端 `/tmp/board_agent.py` 重启后不再存在。
 
 ## 服务与端口
 
@@ -21,7 +22,7 @@
 - `S49weston` → Weston 14.0.1（DRM/GBM），DSI-1 原生 800×1280，`rotate-90` 后逻辑
   1280×800 横向；HDMI 接入后自动 1920×1080。
 - `S99rkdesk` → `rkdesk_server.py`，端口 8088，抓屏 + WebSocket。
-- `8765`：旧 `board_agent.py`，仍在跑，画面全黑；停止前请确认对方不再使用。
+- `8765`：旧代理已删除；板端 `/tmp` 副本在重启后消失，无需再处理。
 
 **重启 `S99rkdesk` 不会重启 Weston**；只有重启 `S48rkdesk-input` 会重建输入设备并重启
 Weston（会关闭板端当前打开的窗口）。
@@ -93,7 +94,7 @@ git fetch origin && git reset --soft origin/main
 ## 待办
 
 - [ ] 接 HDMI 显示器后验证 1920×1080 自动切换与抓屏
-- [ ] 决定是否停止 8765 旧代理（约 14% CPU）
+- [ ] 板端重新上电后确认 8765 旧代理已消失（`/tmp` 已清）
 - [ ] 如需彻底恢复 Weston ELF：从同版本 Buildroot rootfs 取回覆盖
 - [ ] 板端中文 IME（当前浏览器输入中文不会进入板端应用）
 - [ ] 需要时给 RKDesk 加 token / SSH 隧道说明
