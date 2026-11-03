@@ -21,18 +21,62 @@ class InputClient:
     def __init__(self, path: str = "/var/run/rkdesk-input.sock") -> None:
         self.path = path
         self.sock: socket.socket | None = None
-        self.lock = threading.Lock()
+        self.geometry: tuple[int, int] | None = None
+        self.lock = threading.RLock()
+
+    def set_geometry(self, width: int, height: int) -> None:
+        with self.lock:
+            self.geometry = (width, height)
+            if self.sock is not None:
+                try:
+                    self.sock.sendall(self._geometry_payload())
+                except OSError:
+                    self._drop()
+
+    def _geometry_payload(self) -> bytes:
+        if not self.geometry:
+            return b""
+        width, height = self.geometry
+        return (json.dumps({"t": "resize", "w": width, "h": height},
+                           separators=(",", ":")) + "\n").encode()
 
     def _connect(self) -> bool:
         try:
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.settimeout(1.0)
             sock.connect(self.path)
+            sock.settimeout(None)
             self.sock = sock
+            payload = self._geometry_payload()
+            if payload:
+                sock.sendall(payload)
+            threading.Thread(target=self._reader, args=(sock,), daemon=True).start()
+            print("[rkdesk] input channel connected", flush=True)
             return True
         except OSError:
             self.sock = None
             return False
+
+    def _reader(self, sock: socket.socket) -> None:
+        try:
+            while True:
+                if not sock.recv(4096):
+                    break
+        except OSError:
+            pass
+        finally:
+            with self.lock:
+                if self.sock is sock:
+                    self.sock = None
+                    print("[rkdesk] input channel closed", flush=True)
+
+    def _drop(self) -> None:
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+            self.sock = None
 
     def send(self, command: dict) -> bool:
         payload = (json.dumps(command, separators=(",", ":")) + "\n").encode()
@@ -44,11 +88,8 @@ class InputClient:
                     self.sock.sendall(payload)  # type: ignore[union-attr]
                     return True
                 except OSError:
-                    try:
-                        self.sock.close()  # type: ignore[union-attr]
-                    except OSError:
-                        pass
-                    self.sock = None
+                    self._drop()
+            print("[rkdesk] input send failed", flush=True)
         return False
 
 
@@ -67,7 +108,7 @@ class MirrorSource:
         self.last_signature: bytes | None = None
         self.last_refresh = 0.0
         self._update_geometry(force=True)
-        self.input.send({"t": "resize", "w": self.width, "h": self.height})
+        self.input.set_geometry(self.width, self.height)
         print(f"[rkdesk] mirror {self.width}x{self.height} rotation={self.rotation}")
 
     @staticmethod
@@ -110,7 +151,7 @@ class MirrorSource:
             return
         self.rotation, self.width, self.height = rotation, width, height
         self.last_signature = None
-        self.input.send({"t": "resize", "w": width, "h": height})
+        self.input.set_geometry(width, height)
         print(f"[rkdesk] output geometry {width}x{height} transform={rotation}")
 
     def _rotate(self, image: Image.Image) -> Image.Image:
@@ -157,7 +198,7 @@ class MirrorSource:
         if (image.width, image.height) != (self.width, self.height):
             self.width, self.height = image.width, image.height
             self.last_signature = None
-            self.input.send({"t": "resize", "w": self.width, "h": self.height})
+            self.input.set_geometry(self.width, self.height)
             print(f"[rkdesk] display changed to {self.width}x{self.height}")
         if signature == self.last_signature:
             return None

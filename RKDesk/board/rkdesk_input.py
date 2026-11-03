@@ -57,6 +57,11 @@ class InputDaemon:
 
     def _client(self, connection: socket.socket) -> None:
         buffer = b""
+        print("[rkdesk-input] client connected", flush=True)
+        try:
+            connection.sendall(b'{"t":"hello"}\n')
+        except OSError:
+            pass
         try:
             while self.running:
                 data = connection.recv(65536)
@@ -71,11 +76,14 @@ class InputDaemon:
                         command = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if command.get("t") != "move":
+                        print(f"[rkdesk-input] cmd {command}", flush=True)
                     with self.lock:
                         self.virtual.handle(command)
-        except OSError:
-            pass
+        except OSError as error:
+            print(f"[rkdesk-input] client error: {error}", flush=True)
         finally:
+            print("[rkdesk-input] client disconnected", flush=True)
             try:
                 connection.close()
             except OSError:

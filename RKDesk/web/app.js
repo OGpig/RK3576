@@ -281,7 +281,16 @@
     send({ t: "down", x: position.x, y: position.y, b: event.button });
   });
 
-  canvas.addEventListener("pointermove", (event) => queueMove(toServer(event)));
+  // Track moves at document level so the remote cursor keeps following even
+  // when the pointer crosses the floating dock that overlays the canvas.
+  document.addEventListener("pointermove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right ||
+        event.clientY < rect.top || event.clientY > rect.bottom) {
+      return;
+    }
+    queueMove(toServer(event));
+  }, { passive: true });
 
   canvas.addEventListener("pointerup", (event) => {
     event.preventDefault();

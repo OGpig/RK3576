@@ -56,7 +56,17 @@ Weston（会关闭板端当前打开的窗口）。
 - 绝对鼠标坐标 1:1，光标包含在抓屏里，右键/滚轮/拖动已接通；
 - 拖拽光标时 15.1 fps、约 980 KB/s、平均 64.6 KB/帧；静止 0 KB/s；
 - 抓帧 14.7 ms，JPEG q78 约 16 ms，服务 RSS 约 52 MB；
-- 重启 `S99rkdesk` 后 Weston PID 不变。
+- 重启 `S99rkdesk` 后 Weston PID 不变；
+- 重启 `S48rkdesk-input` 后服务端自动重连并重发 `resize 1280×800`，点击 Chromium 仍准确；
+- 光标可覆盖四角、Chromium 图标和底部面板，不再跳过区域。
+
+## 已修复的输入问题
+
+- 输入 socket 连接后沿用了 1 秒 connect timeout，空闲 1 秒 reader 会主动断开；
+  已在连接成功后切回阻塞模式。
+- 守护进程重启后默认几何是 800×1280，服务端重连时必须重发 `resize 1280×800`；
+  否则坐标按比例偏移，表现为「跳过 Chromium / 部分开始菜单」。现在由 `InputClient`
+  在每次重连时自动同步几何。
 
 ## Git 约定（重要：本机不能直接 push）
 
