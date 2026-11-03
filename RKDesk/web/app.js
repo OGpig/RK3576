@@ -366,7 +366,7 @@
   setInterval(() => {
     const now = performance.now();
     const fps = frameCount * 1000 / Math.max(1, now - lastFpsAt);
-    fpsText.textContent = fps.toFixed(0) + " fps";
+    fpsText.textContent = fps < 0.5 ? "静止" : fps.toFixed(0) + " fps";
     frameCount = 0;
     lastFpsAt = now;
     const kbps = byteCount / 1024 / Math.max(0.2, (now - lastBytesAt) / 1000);
