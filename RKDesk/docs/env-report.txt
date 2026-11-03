@@ -1,14 +1,14 @@
 ====================================================================
  RK3576 environment verification (mlsysbook ide-setup)
 ====================================================================
-time       : 2026-11-03 15:02:57 CST
+time       : 2026-11-03 15:06:05 CST
 host       : RK3576-Tronlong
 kernel     : 6.1.115-rt16-03139-g916039f24146
 machine    : aarch64
 buildroot  : Buildroot 2024.02
-uptime     : 23844.85 s
+uptime     : 24032.40 s
 cpu        : TL3576-MiniEVM × 8
-memory     : 1954 MiB total, 1638 MiB available
+memory     : 1954 MiB total, 1637 MiB available
 rootfs     : 9.8 GiB total, 4.5 GiB free
 --------------------------------------------------------------------
  Python
@@ -50,7 +50,7 @@ rootfs     : 9.8 GiB total, 4.5 GiB free
   [PASS] Python >= 3.8      3.11.8
   [PASS] OpenCV             import cv2
   [PASS] NumPy              import numpy
-  [INFO] Display output     no physical HDMI/DSI panel attached; use RKDesk
+  [INFO] Display output     DSI-1 native 800x1280, logical 1280x800 via rotate-90; HDMI not connected
   [INFO] Camera             no sensor attached; /dev/video nodes exist but no capture source
   [INFO] Audio              no speaker/headphone; codec devices exist
   [INFO] Git on board       not installed; use Git on the development computer

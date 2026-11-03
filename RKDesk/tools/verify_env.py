@@ -167,7 +167,7 @@ def main() -> int:
         ("Python >= 3.8", "PASS" if sys.version_info >= (3, 8) else "WARN", sys.version.split()[0]),
         ("OpenCV", "PASS" if any(c[0] == "PASS" and c[1] == "python:cv2" for c in CHECKS) else "WARN", "import cv2"),
         ("NumPy", "PASS" if any(c[0] == "PASS" and c[1] == "python:numpy" for c in CHECKS) else "WARN", "import numpy"),
-        ("Display output", "INFO", "no physical HDMI/DSI panel attached; use RKDesk"),
+        ("Display output", "INFO", "DSI-1 native 800x1280, logical 1280x800 via rotate-90; HDMI not connected"),
         ("Camera", "INFO", "no sensor attached; /dev/video nodes exist but no capture source"),
         ("Audio", "INFO", "no speaker/headphone; codec devices exist"),
         ("Git on board", "INFO", "not installed; use Git on the development computer"),
