@@ -159,7 +159,9 @@ RKDesk/
 ├─ deploy.sh                 # tar over SSH 部署
 ├─ deploy/
 │  ├─ S48rkdesk-input        # 输入设备，早于 Weston
-│  └─ S99rkdesk              # 抓屏服务
+│  ├─ S49weston              # 修复后的 Weston init（停止逻辑）
+│  ├─ S99rkdesk              # 抓屏服务
+│  └─ weston                 # wet_main 启动器，安装到 /usr/bin/weston
 ├─ tools/
 │  ├─ verify_env.py          # mlsys IDE 实验环境校验
 │  ├─ ws_bench.js            # 帧率/带宽压测
@@ -168,7 +170,9 @@ RKDesk/
 │  └─ virtual_input.py       # uinput 设备实验脚本
 └─ docs/
    ├─ browser-mirror.png     # 浏览器中的真实桌面
+   ├─ browser-live.png       # 浏览器事件链路输入验证
    ├─ screen.jpg             # 真实桌面原图
+   ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
    ├─ env-report.txt
    └─ mlsys-ide-setup.md
 ```
@@ -203,6 +207,8 @@ lib.wet_main(len(argv), array, None)
 因为 `killall weston` 匹配不到 `python3 /usr/bin/weston`）。
 
 - 损坏文件备份：`/usr/bin/weston.damaged.20261103`
+- 仓库内的 `deploy/weston` 就是启动器，`deploy.sh` 会安装到 `/usr/bin/weston`；
+  若目标文件还不是启动器，会先备份为 `/usr/bin/weston.orig.<时间戳>`。
 - 如需彻底恢复原版：从同版本 Buildroot 2024.02 / Weston 14.0.1 rootfs 取回 ELF，
   覆盖 `/usr/bin/weston` 即可。
 - **不要**把任何命令输出重定向到 `/usr/bin/weston`。

@@ -16,8 +16,18 @@ tar -C "$ROOT/board" -cf - rkdesk rkdesk_server.py rkdesk_input.py \
 tar -C "$ROOT" -cf - web \
     | ssh "$HOST" "tar -xf - -C /opt/rkdesk && chmod -R a+rX /opt/rkdesk"
 
-tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S99rkdesk \
-    | ssh "$HOST" "tar -xf - -C /tmp && mv /tmp/deploy/S48rkdesk-input /etc/init.d/S48rkdesk-input && mv /tmp/deploy/S99rkdesk /etc/init.d/S99rkdesk && chmod +x /etc/init.d/S48rkdesk-input /etc/init.d/S99rkdesk"
+tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S49weston deploy/S99rkdesk deploy/weston \
+    | ssh "$HOST" "
+        tar -xf - -C /tmp &&
+        mv /tmp/deploy/S48rkdesk-input /etc/init.d/S48rkdesk-input &&
+        mv /tmp/deploy/S99rkdesk /etc/init.d/S99rkdesk &&
+        if ! grep -q wet_main /usr/bin/weston 2>/dev/null; then
+            cp -a /usr/bin/weston /usr/bin/weston.orig.\$(date +%Y%m%d-%H%M%S) 2>/dev/null || true
+        fi &&
+        install -m 755 /tmp/deploy/weston /usr/bin/weston &&
+        install -m 755 /tmp/deploy/S49weston /etc/init.d/S49weston &&
+        chmod +x /etc/init.d/S48rkdesk-input /etc/init.d/S99rkdesk
+      "
 
 ssh "$HOST" "/etc/init.d/S48rkdesk-input restart; sleep 4; /etc/init.d/S99rkdesk restart"
 

@@ -1,0 +1,66 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          weston
+# Required-Start:    mountvirtfs
+# Required-Stop:
+# Should-Start:
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Linux weston daemon
+### END INIT INFO
+
+PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
+
+# Load default env variables from profiles(e.g. /etc/profile.d/weston.sh)
+. /etc/profile
+
+start_weston()
+{
+	/usr/bin/weston --debug 2>&1 | tee /var/log/weston.log &
+}
+
+stop_weston()
+{
+	# /usr/bin/weston is a python launcher, so killall weston never matches it.
+	for pid in $(ps -eo pid,args | awk '/python3 \/usr\/bin\/weston/ {print $1}'); do
+		kill "$pid" 2>/dev/null || true
+	done
+	killall weston-keyboard weston-desktop-shell 2>/dev/null || true
+}
+
+wait_stopped()
+{
+	while ps -eo args | grep -q '[p]ython3 /usr/bin/weston'; do
+		sleep .1
+	done
+}
+
+case "$1" in
+	start)
+		echo -n "starting weston... "
+		start_weston
+		echo "done."
+		;;
+	stop)
+		echo -n "stoping weston... "
+		stop_weston || true
+		wait_stopped
+		echo "done."
+		;;
+	restart|reload)
+		echo -n "stoping weston... "
+		stop_weston
+		wait_stopped
+		echo "done."
+
+		echo -n "starting weston... "
+		start_weston
+		echo "done."
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+esac
+
+exit 0

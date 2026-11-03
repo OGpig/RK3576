@@ -31,6 +31,7 @@ Weston（会关闭板端当前打开的窗口）。
    没有 apt、gcc、git、VNC server。
 2. `/usr/bin/weston` 原 ELF 在 10:30 被写坏成 56 字节错误文本。现已恢复为 Python 启动器：
    调用 `/usr/lib/weston/libexec_weston.so.0` 的 `wet_main(argc, argv, NULL)`。
+   仓库里的 `RKDesk/deploy/weston` 是启动器源，`deploy.sh` 会自动安装；
    损坏文件备份：`/usr/bin/weston.damaged.20261103`。
    **不要**再把任何命令输出重定向到 `/usr/bin/weston`。
 3. `/etc/init.d/S49weston` 的 `stop_weston()` 已改为按
