@@ -20,3 +20,6 @@ debug_frame.jpg
 
 # WorkBuddy workspace metadata
 .workbuddy/
+
+# Debug frames from the earlier MVP
+Visualisation/debug_frame*.jpg

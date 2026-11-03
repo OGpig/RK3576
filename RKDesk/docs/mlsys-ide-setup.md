@@ -167,16 +167,17 @@ summary: 17 passed, 1 warning
 
 | 缺失 | 影响 | 替代方案 |
 | --- | --- | --- |
-| HDMI/DSI 显示器 | 看不到板端 GUI | **RKDesk**：浏览器打开 `http://192.168.31.153:8088` |
-| USB 键鼠 | 无法本地操作 | RKDesk 把浏览器鼠标/键盘事件回传板端 |
+| HDMI/DSI 显示器 | 看不到板端 GUI | **RKDesk**：浏览器打开 `http://192.168.31.153:8088`，镜像真实扫描输出 |
+| USB 键鼠 | 无法本地操作 | RKDesk 用 uinput 注入绝对鼠标 + 键盘，直接操作 Weston 桌面 |
 | 摄像头 | 无法做图像采集实验 | 当前 `/dev/video*` 是 ISP/编解码节点，无 sensor；后续插 USB 摄像头即可 |
 | 耳机/扬声器 | 无法听音频 | 板端有 ES8388/HDMI 声卡节点；可先用文件方式处理音频，或接 USB 声卡 |
 
-RKDesk 的终端就是板端真实 shell，因此 **IDE 实验里的所有命令都可以直接在
-浏览器终端里执行**，不需要额外显示器。
+RKDesk 不是自绘终端，而是把板端 **DRM/KMS 上真实扫描输出的画面**编码后推到浏览器；
+鼠标坐标 1:1 映射到 800×1280（或 HDMI 1920×1080），点击、拖动、滚轮、右键、键盘
+都会注入 Weston。打开板端桌面底部的终端图标（Wayland Terminal），即可执行实验命令。
 
 ```bash
-# 在 RKDesk 终端里
+# 在板端 Wayland Terminal 里
 uname -a
 free -h
 df -h
@@ -190,8 +191,9 @@ python3 -c "import numpy, cv2, rknnlite; print('ML stack ok')"
 - [x] 开发机能 `ssh rk3576` 免密登录
 - [x] 板端 Python 3.11.8，numpy/OpenCV/ONNX/RKNN 可导入
 - [x] 板端 4.6 GB 可用磁盘、1.9 GB 可见内存（另有 2 GB swapfile）
-- [x] 无显示器也能看到并操作板端桌面（RKDesk，`http://192.168.31.153:8088`）
-- [x] 浏览器终端可执行命令、支持中文与颜色
+- [x] 无显示器也能看到并操作板端真实桌面（RKDesk 镜像 DRM 扫描输出，`http://192.168.31.153:8088`）
+- [x] 板端桌面可用鼠标点击、拖动、滚轮与键盘输入
+- [x] 浏览器里可打开 Wayland Terminal 并执行命令
 - [ ] VS Code Remote-SSH 首次连接（需本机安装 VS Code 后执行）
 - [ ] 外接 USB 摄像头后的 `v4l2-ctl --list-devices` 验证（当前无硬件）
 

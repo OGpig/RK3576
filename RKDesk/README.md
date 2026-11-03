@@ -1,169 +1,215 @@
-# RKDesk · RK3576 远程工作台
+# RKDesk · RK3576 真实屏幕远程工作台
 
-给没有显示器、键盘、鼠标的 RK3576 开发板做一个「浏览器里的桌面」：
-**画面由板端自己渲染**，通过 WebSocket 把 JPEG 帧推到浏览器；鼠标、滚轮、键盘事件回传板端，
-由板端窗口管理器和 PTY 终端处理。
+把 RK3576 开发板的 **HDMI / DSI 实际输出画面**镜像到浏览器，并用本机鼠标键盘直接操作板端桌面。
+画面不是自绘 UI，而是从 DRM/KMS 当前扫描缓冲区读出的真实像素；输入通过 `/dev/uinput`
+注入 Weston，和接物理显示器/鼠标的体验一致。
 
-它不依赖 X11 / Weston / VNC，也不需要往板端安装任何东西——只用板端已有的
-Python 3.11 + Pillow。
+![浏览器中的真实板端桌面](docs/browser-mirror.png)
 
-![浏览器中的 RKDesk](docs/browser.png)
+当前实测环境：TL3576-EVM，Buildroot 2024.02，Weston 14.0.1，DSI-1 800×1280
+（HDMI 未接；接上 HDMI 后会自动切到 1920×1080 并自适应）。
 
 ## 为什么不是 VNC
 
-这块 TL3576-EVM 运行的是 Tronlong Buildroot 2024.02：
+板端是精简 Buildroot：
 
 - 没有 `vncserver` / `x11vnc` / `wayvnc`，也没有包管理器；
-- 只有 DRM 后端，没有 VNC/headless 后端；
-- 更关键的是，探测时发现 `/usr/bin/weston` 已经被写坏（只剩 56 字节的错误文本，
-  不是可执行文件），所以无法再启动原来的 Weston 桌面。
+- Weston 只编译了 DRM 后端，没有 VNC / headless 后端；
+- `weston-screenshooter` 对普通客户端返回 `Output capture error: unauthorized`；
+- `/dev/fb0` 是 Rockchip 的 fbdev 模拟，Weston 用 GBM 渲染，读出来全黑。
 
-RKDesk 因此把「桌面」放在板端进程里：窗口、终端、文件管理器、性能面板全部由
-Pillow 画到内存位图，再编码成 JPEG 推流。浏览器只负责显示和采集输入。
-这条路对当前镜像最稳，资源占用也低。
-
-> ⚠️ `/usr/bin/weston` 的损坏不是本项目造成的（探测前就已存在）。恢复方法见文末。
+所以 RKDesk 直接走 **DRM dma-buf**：取当前 CRTC 的 framebuffer，`drmPrimeHandleToFD`
+导出 dma-buf，`mmap` 后按 `BGRX` 解成 RGB，编码 JPEG 推给浏览器。这是屏幕上真正
+正在扫描输出的内容，HDMI 和 DSI 都适用。
 
 ## 快速开始
 
-板端服务已经在跑：
+浏览器打开：
 
 ```text
 http://192.168.31.153:8088
 ```
 
-浏览器打开即可。点击画面后可直接键盘输入，滚轮在终端里回看历史。
+点击画面后即可用本机鼠标/键盘操作板端。底部工具栏支持画质、全屏、粘贴、重连。
 
-主机端重新部署（改完代码后）：
+部署（改完代码）：
 
 ```bash
 cd F:/data/RK3576/RKDesk
-bash deploy.sh                 # 默认 root@192.168.31.153
+bash deploy.sh
 ```
 
-板端服务管理：
+板端服务：
 
 ```bash
 ssh rk3576
-/etc/init.d/S99rkdesk status
-/etc/init.d/S99rkdesk restart
+/etc/init.d/S48rkdesk-input status   # 虚拟鼠标/键盘（必须早于 Weston）
+/etc/init.d/S49weston status         # 真实桌面合成器
+/etc/init.d/S99rkdesk status         # 抓屏 + WebSocket 服务
 tail -f /var/log/rkdesk.log
 ```
 
-> 端口说明：旧 MVP 的 `board_agent.py` 仍占用 `8765`（画面为全黑，已无用途）；
-> RKDesk 使用 `8088`，两者互不影响。确认不再需要旧代理后可自行停止。
-
-## 功能
-
-- **终端**：真实 PTY（`/bin/sh -i`），支持 ANSI 颜色、光标、宽字符/中文、滚轮回看、
-  Ctrl+C / Ctrl+D / 方向键 / F1-F12。
-- **窗口管理**：拖动标题栏、右下角缩放、双击标题栏最大化、关闭/最小化。
-- **性能面板**：CPU、内存、温度、负载、运行时间、磁盘、60 秒 CPU 曲线。
-- **文件管理器**：浏览 `/root`、`/userdata` 等目录，点击文本文件直接预览。
-- **浏览器工具栏**：画质（45–90）、全屏、粘贴剪贴板、重连、实时延迟/帧率/带宽。
-- **多客户端**：共享同一个板端会话（和 VNC 一样）。
-- **可选 Token**：`--token xxx` 后访问 `http://board:8088/?token=xxx`。
+> 输入设备独立在 `rkdesk_input.py` 守护进程里，重启 `S99rkdesk` **不会**重启 Weston，
+> 不会关掉你正在用的窗口。只有重启 `S48rkdesk-input` 才会重建设备并重启 Weston。
 
 ## 架构
 
 ```text
 ┌──────────────────────────── 浏览器 ────────────────────────────┐
-│  canvas  ← JPEG 帧 (WebSocket binary)                          │
+│  canvas ← JPEG 帧 (WebSocket binary)                           │
 │  鼠标/键盘/滚轮 ── JSON (WebSocket text) ──┐                    │
 └────────────────────────────────────────────┼───────────────────┘
                                              ▼
-┌────────────────────────── RK3576 板端 ─────────────────────────┐
-│  ThreadingHTTPServer + 自实现 WebSocket                        │
-│    ├─ 渲染线程：Desktop.render() → JPEG（约 15 ms/帧）          │
-│    ├─ 输入分发：窗口管理器 / 终端                               │
-│    ├─ PTY：/bin/sh -i（TIOCSWINSZ 跟随窗口大小）                │
-│    └─ 统计线程：/proc/stat、/proc/meminfo、thermal、statvfs     │
+┌──────────────────────── RK3576 板端 ───────────────────────────┐
+│  rkdesk_server.py                                              │
+│    ├─ 抓帧线程：DRM CRTC fb → dma-buf mmap → JPEG（15 ms/帧）   │
+│    ├─ WebSocket / HTTP / 静态页面                              │
+│    └─ 输入转发 → /var/run/rkdesk-input.sock                    │
+│                                                                │
+│  rkdesk_input.py（S48 启动，早于 Weston）                       │
+│    ├─ RKDesk AbsMouse：ABS_X/Y + 按键 + 滚轮（libinput: pointer）│
+│    └─ RKDesk Keyboard：全键码                                  │
+│                            │                                   │
+│                            ▼                                   │
+│  Weston 14.0.1（DRM/GBM，DSI-1 800×1280 或 HDMI 1920×1080）     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
-- 默认虚拟分辨率 **1280×800**（横向，适合桌面）。可用 `--width/--height` 改。
-- 默认 12 fps、JPEG 质量 64；拖动窗口时约 600 KB/s，静止时约 50 KB/s（1 帧/秒心跳）。
-- 服务常驻内存约 41 MB，CPU 平均约 12%（单核占比）。
+## 功能
 
-## HTTP / WebSocket 接口
+- **真实画面镜像**：800×1280 / 1920×1080 自动适配，不缩放板端 UI。
+- **绝对鼠标**：浏览器坐标 1:1 映射到屏幕，支持左/中/右键、拖动、滚轮。
+- **键盘**：ASCII 字符、方向键、F1–F12、Ctrl/Alt/Shift/Meta 组合键。
+- **断线重连**：客户端自动重连，服务端帧缓存保证新客户端立即出画。
+- **静态省流**：画面不变时不编码、不发送（0 KB/s），变化时 15 fps。
+- **多客户端**：共享同一块板端屏幕（和 VNC 一样）。
+- **虚拟桌面兜底**：`--mode virtual` 可在没有 Weston/DRM 时使用板端自绘桌面。
+
+## 性能（实测）
+
+| 指标 | 数值 |
+| --- | --- |
+| DRM 抓帧 | 14.7 ms/帧（800×1280） |
+| JPEG 编码 q78 | 约 16 ms/帧 |
+| 推流 | 15.1 fps，拖动时约 980 KB/s，静止 0 |
+| 平均帧大小 | 64.6 KB |
+| 服务内存 | 约 52 MB |
+| CPU | 推流时约 50% 单核（RK3576 共 8 核） |
+
+## 输入说明
+
+- 鼠标位置是**绝对坐标**，不会像相对鼠标那样漂移；板端会画出自己的光标（已包含在抓屏里），
+  浏览器端隐藏本地光标，避免双指针。
+- 键盘直接注入 Weston 当前焦点窗口。中文输入依赖板端输入法；当前镜像没有中文 IME，
+  所以浏览器里输入中文不会进入板端应用（ASCII 正常）。
+- 粘贴按钮发送的是按键序列，同样只支持 ASCII。
+
+## HDMI / DSI
+
+`/etc/profile.d/weston.sh` 把 `WESTON_DRM_PRIMARY` 设为 `HDMI-A-1`。`/usr/bin/weston`
+启动器会检查连接状态：
+
+- HDMI 已连接 → 使用 HDMI（通常 1920×1080 横向）；
+- HDMI 未连接、DSI 已连接 → 回退到 DSI-1（800×1280 竖向）。
+
+抓屏端每帧重新读取 CRTC；分辨率变化时自动更新输入映射并通知浏览器重设画布，
+不需要重启服务。
+
+## HTTP / WebSocket
 
 | 路径 | 说明 |
 | --- | --- |
 | `GET /` | Web 客户端 |
-| `GET /healthz` | 服务状态（尺寸、客户端数、fps、编码耗时） |
-| `GET /api/stats` | 板端 CPU/内存/温度/磁盘等 |
-| `GET /api/screenshot.jpg` | 当前桌面单帧，便于脚本/文档使用 |
-| `POST /api/paste` | 把请求体文本粘贴到当前终端 |
-| `WS /ws` | 帧推流 + 输入事件 |
+| `GET /healthz` | 模式、分辨率、客户端数、fps、编码耗时 |
+| `GET /api/stats` | 板端 CPU/内存/温度/磁盘 |
+| `GET /api/screenshot.jpg` | 当前真实屏幕单帧（脚本/文档用） |
+| `GET /api/debug` | 内部状态（模式、窗口/输入） |
+| `WS /ws` | JPEG 帧 + 输入事件 |
 
-WebSocket 输入消息（JSON）：
+输入消息：
 
 ```json
 {"t":"move","x":300,"y":200}
 {"t":"down","x":300,"y":200,"b":0}
 {"t":"up","x":300,"y":200,"b":0}
 {"t":"wheel","x":300,"y":200,"dy":-1}
-{"t":"key","key":"Enter","ctrl":false,"alt":false}
-{"t":"text","text":"echo hi\n"}
-{"t":"paste","text":"..."}
+{"t":"key","key":"Enter","ctrl":false,"alt":false,"shift":false}
+{"t":"text","text":"uname -a\n"}
 {"t":"quality","value":78}
 {"t":"ping","ts":123.4}
 ```
+
+`b`: 0 左键、1 中键、2 右键。
 
 ## 目录
 
 ```text
 RKDesk/
 ├─ board/
-│  ├─ rkdesk_server.py       # 入口
+│  ├─ rkdesk_server.py       # Web 服务入口
+│  ├─ rkdesk_input.py        # 输入守护进程（S48）
 │  └─ rkdesk/
-│     ├─ server.py           # HTTP / WebSocket / PTY / 帧循环
-│     ├─ desktop.py          # 窗口管理器与全部绘制
-│     └─ terminal.py         # VT100/xterm 解析与字符网格
+│     ├─ server.py           # HTTP / WebSocket / 帧循环
+│     ├─ mirror.py           # DRM 抓屏 + 输入转发客户端
+│     ├─ drm.py              # KMS/dma-buf 抓帧
+│     ├─ input.py            # uinput 绝对鼠标 / 键盘
+│     ├─ desktop.py          # 虚拟桌面兜底（--mode virtual）
+│     └─ terminal.py         # 虚拟模式 PTY 终端
 ├─ web/                      # 浏览器客户端（无构建步骤）
 ├─ deploy.sh                 # tar over SSH 部署
-├─ deploy/S99rkdesk          # Buildroot init 脚本
+├─ deploy/
+│  ├─ S48rkdesk-input        # 输入设备，早于 Weston
+│  └─ S99rkdesk              # 抓屏服务
 ├─ tools/
 │  ├─ verify_env.py          # mlsys IDE 实验环境校验
 │  ├─ ws_bench.js            # 帧率/带宽压测
-│  └─ cdp_shot.js            # 无头浏览器截图
+│  ├─ cdp_shot.js            # 无头浏览器截图
+│  ├─ drm_capture.py         # 独立抓帧脚本
+│  └─ virtual_input.py       # uinput 设备实验脚本
 └─ docs/
-   ├─ browser.png
+   ├─ browser-mirror.png     # 浏览器中的真实桌面
+   ├─ screen.jpg             # 真实桌面原图
    ├─ env-report.txt
    └─ mlsys-ide-setup.md
 ```
 
 ## 已知限制
 
-- 只有一块共享桌面，多客户端会互相看到同一会话；没有多用户隔离。
-- 视频/音频不做转发；当前也没有接摄像头和扬声器。
-- 全屏 JPEG 推流，没有做分块脏区编码；12 fps 对终端足够，但不适合看视频。
-- 默认无认证、无 TLS，仅限可信局域网；需要跨网请加 SSH 隧道或 `--token`。
-- 这是「板端渲染的虚拟桌面」，不是 Weston 合成器的画面；原 Weston 恢复前，
-  Qt/LVGL 等 Wayland 客户端无法显示。
+- 没有音频转发；板端声卡节点存在，但未接扬声器。
+- 默认无认证、无 TLS，仅限可信局域网；跨网请用 SSH 隧道或 `--token`。
+- 浏览器到板端的键盘是按键级注入，中文/emoji 需要板端 IME。
+- 服务重启不会重启 Weston；但重启输入守护进程会重建设备，Weston 需要重启才能看到新设备
+  （脚本已自动处理，会丢失当前打开的窗口）。
+- 画面包含板端光标；浏览器本地光标被隐藏，因此快速移动时会有约 1 帧的跟手延迟。
 
-## 恢复 Weston（可选）
+## Weston 修复说明（重要）
 
-`/usr/bin/weston` 现在只有 56 字节，内容是：
+探测时发现 `/usr/bin/weston` 已被写坏，只剩 56 字节错误文本：
 
 ```text
 /etc/init.d/S49weston: line 20: 11: Bad file descriptor
 ```
 
-恢复方式（任选其一）：
+原始 ELF 已丢失，但 `libexec_weston.so` 仍导出 `wet_main()`，因此现在的
+`/usr/bin/weston` 是一个 Python 启动器：
 
-1. 用 Tronlong 提供的同版本 Buildroot 镜像重新烧录，或从镜像的 rootfs 中取回
-   `/usr/bin/weston`（Buildroot 2024.02 / Weston 14.0.1 / glibc 2.38）。
-2. 从另一块同型号、同镜像的板子复制 `/usr/bin/weston`（约 163 KB，ELF aarch64）。
-3. 恢复后执行 `/etc/init.d/S49weston start`，确认 `weston --version` 输出 14.0.1。
+```python
+lib = ctypes.CDLL('/usr/lib/weston/libexec_weston.so.0')
+lib.wet_main.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), ctypes.c_void_p]
+lib.wet_main(len(argv), array, None)
+```
 
-> 注意：不要把命令输出重定向到 `/usr/bin/weston`。这次损坏很可能就是类似
-> `... | tee /usr/bin/weston` 的误操作导致的。
+它保持和原二进制相同的命令行行为，`/etc/init.d/S49weston` 无需改动（只修了停止逻辑，
+因为 `killall weston` 匹配不到 `python3 /usr/bin/weston`）。
+
+- 损坏文件备份：`/usr/bin/weston.damaged.20261103`
+- 如需彻底恢复原版：从同版本 Buildroot 2024.02 / Weston 14.0.1 rootfs 取回 ELF，
+  覆盖 `/usr/bin/weston` 即可。
+- **不要**把任何命令输出重定向到 `/usr/bin/weston`。
 
 ## 安全
 
-这是局域网实验工具，默认监听 `0.0.0.0:8088`，没有账号密码。
-不要把端口映射到公网；跨公网请用 SSH 隧道：
+默认监听 `0.0.0.0:8088`，无账号密码。不要映射到公网。跨网使用 SSH 隧道：
 
 ```bash
 ssh -L 8088:127.0.0.1:8088 root@192.168.31.153

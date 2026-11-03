@@ -1,14 +1,14 @@
 ====================================================================
  RK3576 environment verification (mlsysbook ide-setup)
 ====================================================================
-time       : 2026-11-03 14:00:19 CST
+time       : 2026-11-03 14:33:50 CST
 host       : RK3576-Tronlong
 kernel     : 6.1.115-rt16-03139-g916039f24146
 machine    : aarch64
 buildroot  : Buildroot 2024.02
-uptime     : 20087.16 s
+uptime     : 22097.59 s
 cpu        : TL3576-MiniEVM × 8
-memory     : 1954 MiB total, 1752 MiB available
+memory     : 1954 MiB total, 1636 MiB available
 rootfs     : 9.8 GiB total, 4.5 GiB free
 --------------------------------------------------------------------
  Python
@@ -43,7 +43,7 @@ rootfs     : 9.8 GiB total, 4.5 GiB free
   sshd     : OpenSSH_9.6p1, OpenSSL 3.2.1 30 Jan 2024
 --------------------------------------------------------------------
  RKDesk remote desktop
-  http://<board>:8088  OK  1280x800  clients=1  shell=True
+  http://<board>:8088  OK  800x1280  clients=1  shell=True
 --------------------------------------------------------------------
  IDE-setup checklist
   [PASS] SSH login          root@192.168.31.153

@@ -10,16 +10,16 @@ echo "[deploy] source: $ROOT"
 
 ssh "$HOST" "mkdir -p /opt/rkdesk /var/log"
 
-tar -C "$ROOT/board" -cf - rkdesk rkdesk_server.py \
+tar -C "$ROOT/board" -cf - rkdesk rkdesk_server.py rkdesk_input.py \
     | ssh "$HOST" "tar -xf - -C /opt/rkdesk"
 
 tar -C "$ROOT" -cf - web \
     | ssh "$HOST" "tar -xf - -C /opt/rkdesk && chmod -R a+rX /opt/rkdesk"
 
-tar -C "$ROOT" -cf - deploy/S99rkdesk \
-    | ssh "$HOST" "tar -xf - -C /tmp && mv /tmp/deploy/S99rkdesk /etc/init.d/S99rkdesk && chmod +x /etc/init.d/S99rkdesk"
+tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S99rkdesk \
+    | ssh "$HOST" "tar -xf - -C /tmp && mv /tmp/deploy/S48rkdesk-input /etc/init.d/S48rkdesk-input && mv /tmp/deploy/S99rkdesk /etc/init.d/S99rkdesk && chmod +x /etc/init.d/S48rkdesk-input /etc/init.d/S99rkdesk"
 
-ssh "$HOST" "/etc/init.d/S99rkdesk restart"
+ssh "$HOST" "/etc/init.d/S48rkdesk-input restart; sleep 4; /etc/init.d/S99rkdesk restart"
 
 echo -n "[deploy] waiting for health"
 for _ in $(seq 1 20); do

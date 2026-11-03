@@ -160,7 +160,9 @@
           setFrameSize(serverWidth, serverHeight);
           fitCanvas();
           hideOverlay();
-          setStatus("online", "已连接 · " + serverWidth + "×" + serverHeight);
+          const mirror = message.mode === "mirror";
+          document.body.classList.toggle("mirror", mirror);
+          setStatus("online", "已连接 · " + serverWidth + "×" + serverHeight + (mirror ? " · 真实屏幕" : ""));
           startLatency();
         } else if (message.t === "pong") {
           const rtt = performance.now() - message.ts;

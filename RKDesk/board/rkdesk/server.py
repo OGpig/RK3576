@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 from PIL import Image
 
 from .desktop import Desktop, HEIGHT, WIDTH
+from .mirror import MirrorSource
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -213,12 +214,23 @@ class App:
         self.quality = args.quality
         self.target_fps = args.fps
         self.token = args.token
+        self.mode = args.mode
         self.desktop = Desktop(args.width, args.height)
         self.desktop.show_cursor = args.show_cursor
         self.shell = Shell(self.desktop)
-        self.desktop.on_terminal_input = self.shell.write
-        self.desktop.on_terminal_resize = self.shell.resize
-        self.desktop.on_shell_restart = self.shell.start
+        self.mirror = None
+        self.last_image = None
+        self.force_frame = True
+        if self.mode == "mirror":
+            self.mirror = MirrorSource(input_socket=args.input_socket,
+                                       device=args.device,
+                                       start_weston=not args.no_restart_weston)
+            self.width, self.height = self.mirror.width, self.mirror.height
+            self.desktop.width, self.desktop.height = self.width, self.height
+        else:
+            self.desktop.on_terminal_input = self.shell.write
+            self.desktop.on_terminal_resize = self.shell.resize
+            self.desktop.on_shell_restart = self.shell.start
         self.clients: list[WSClient] = []
         self.clients_lock = threading.Lock()
         self.frame_lock = threading.Lock()
@@ -299,12 +311,25 @@ class App:
         while self.running:
             begin = time.perf_counter()
             image = None
-            with self.desktop.lock:
-                due = self.desktop.dirty or (time.monotonic() - last_render) > 1.0
-                if due:
-                    image = self.desktop.render()
-                    self.desktop.dirty = False
-                    last_render = time.monotonic()
+            if self.mode == "mirror":
+                try:
+                    image = self.mirror.grab()
+                    if image is not None:
+                        self.last_image = image
+                    elif self.force_frame:
+                        image = self.last_image
+                    self.force_frame = False
+                except Exception as error:  # noqa: BLE001 - display may be hotplugged
+                    print(f"[rkdesk] capture error: {error}")
+                    time.sleep(0.5)
+                    continue
+            else:
+                with self.desktop.lock:
+                    due = self.desktop.dirty or (time.monotonic() - last_render) > 1.0
+                    if due:
+                        image = self.desktop.render()
+                        self.desktop.dirty = False
+                        last_render = time.monotonic()
             if image is not None:
                 encode_start = time.perf_counter()
                 if self.scale < 0.999:
@@ -337,10 +362,12 @@ class App:
         with self.desktop.lock:
             self.desktop.clients = len(self.clients)
             self.desktop.dirty = True
+        self.force_frame = True
         client.send_text(json.dumps({
             "t": "hello", "version": VERSION, "width": int(self.width * self.scale),
             "height": int(self.height * self.scale), "fps": self.target_fps,
             "quality": self.quality, "shell": self.desktop.shell_alive,
+            "mode": self.mode,
         }, separators=(",", ":")))
         with self.frame_lock:
             if self.latest_jpeg:
@@ -364,6 +391,26 @@ class App:
     # ---- input
     def handle_message(self, client: WSClient, message: dict) -> None:
         kind = message.get("t")
+        if kind == "ping":
+            client.send_text(json.dumps({"t": "pong", "ts": message.get("ts")}, separators=(",", ":")))
+            return
+        if kind == "quality":
+            self.quality = max(30, min(92, int(message.get("value", self.quality))))
+            self.force_frame = True
+            return
+        if self.mode == "mirror":
+            if kind == "move":
+                self.mirror.move(int(message.get("x", 0)), int(message.get("y", 0)))
+            elif kind in ("down", "up"):
+                self.mirror.move(int(message.get("x", 0)), int(message.get("y", 0)))
+                self.mirror.button(int(message.get("b", 0)), kind == "down")
+            elif kind == "wheel":
+                self.mirror.wheel(float(message.get("dy", 0)))
+            elif kind == "key":
+                self.mirror.key(message)
+            elif kind in ("text", "paste"):
+                self.mirror.text(str(message.get("text", "")))
+            return
         with self.desktop.lock:
             if kind == "move":
                 self.desktop.pointer_move(int(message.get("x", 0)), int(message.get("y", 0)))
@@ -383,13 +430,8 @@ class App:
                     self.desktop.paste(str(message.get("text", "")))
             elif kind == "paste":
                 self.desktop.paste(str(message.get("text", "")))
-            elif kind == "quality":
-                self.quality = max(30, min(92, int(message.get("value", self.quality))))
-                self.desktop.dirty = True
             elif kind == "open":
                 self.desktop.ensure_window(str(message.get("window", "terminal")))
-            elif kind == "ping":
-                client.send_text(json.dumps({"t": "pong", "ts": message.get("ts")}, separators=(",", ":")))
             elif kind == "restart-shell":
                 if not self.desktop.shell_alive:
                     self.shell.start()
@@ -420,7 +462,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/healthz":
             self._json({
-                "ok": True, "version": VERSION, "width": APP.width, "height": APP.height,
+                "ok": True, "version": VERSION, "mode": APP.mode,
+                "width": APP.width, "height": APP.height,
                 "clients": len(APP.clients), "fps": round(APP.fps, 1),
                 "encode_ms": round(APP.encode_ms, 1), "quality": APP.quality,
                 "shell": APP.desktop.shell_alive,
@@ -429,6 +472,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/stats":
             self._json(APP.desktop.stats)
+            return
+        if path == "/api/debug":
+            with APP.desktop.lock:
+                self._json({
+                    "mode": APP.mode,
+                    "display": [APP.width, APP.height],
+                    "terminal": [APP.desktop.term.cols, APP.desktop.term.rows],
+                    "focus": APP.desktop.focus.kind if APP.desktop.focus else None,
+                    "drag": APP.desktop.drag[1] if APP.desktop.drag else None,
+                    "windows": [
+                        {"kind": w.kind, "x": w.x, "y": w.y, "w": w.w, "h": w.h, "visible": w.visible}
+                        for w in APP.desktop.windows
+                    ],
+                })
             return
         if path in ("/api/screenshot.jpg", "/frame.jpg"):
             data = APP.snapshot()
@@ -575,34 +632,44 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     global APP
-    parser = argparse.ArgumentParser(description="RKDesk virtual desktop server")
+    parser = argparse.ArgumentParser(description="RKDesk remote desktop server")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8088)
+    parser.add_argument("--mode", choices=("mirror", "virtual"), default="mirror",
+                        help="mirror: real DRM screen; virtual: board-rendered desktop")
+    parser.add_argument("--device", default="/dev/dri/card0")
+    parser.add_argument("--input-socket", default="/var/run/rkdesk-input.sock")
+    parser.add_argument("--no-restart-weston", action="store_true",
+                        help="do not start Weston when the mirror service starts")
     parser.add_argument("--width", type=int, default=WIDTH)
     parser.add_argument("--height", type=int, default=HEIGHT)
-    parser.add_argument("--fps", type=float, default=12.0)
-    parser.add_argument("--quality", type=int, default=64)
+    parser.add_argument("--fps", type=float, default=15.0)
+    parser.add_argument("--quality", type=int, default=78)
     parser.add_argument("--scale", type=float, default=1.0)
     parser.add_argument("--token", default="")
     parser.add_argument("--show-cursor", action="store_true")
     args = parser.parse_args()
 
     APP = App(args)
-    APP.shell.start()
+    if APP.mode == "virtual":
+        APP.shell.start()
     threading.Thread(target=APP._frame_loop, daemon=True, name="frame-loop").start()
     threading.Thread(target=APP._sample_stats, daemon=True, name="stats").start()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
-    print(f"[rkdesk] v{VERSION} listening on http://{args.host}:{args.port} "
-          f"({args.width}x{args.height}@{args.fps:g}fps q{args.quality})")
+    print(f"[rkdesk] v{VERSION} mode={APP.mode} listening on http://{args.host}:{args.port} "
+          f"({APP.width}x{APP.height}@{args.fps:g}fps q{args.quality})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         APP.running = False
-        APP.shell.stop()
+        if APP.mode == "virtual":
+            APP.shell.stop()
+        if APP.mirror:
+            APP.mirror.close()
         server.server_close()
 
 

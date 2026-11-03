@@ -52,6 +52,8 @@ function getJson(url) {
   await new Promise((resolve) => socket.on("open", resolve));
   await send("Page.enable");
   await send("Runtime.enable");
+  await send("Page.reload", { ignoreCache: true });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
   await new Promise((resolve) => setTimeout(resolve, waitMs));
   await send("Runtime.evaluate", { expression: "window.dispatchEvent(new Event('resize'))" });
   await new Promise((resolve) => setTimeout(resolve, 700));

@@ -101,6 +101,9 @@ canvas {
   image-rendering: auto;
 }
 
+/* Mirror mode: the board renders its own cursor into the scanout. */
+body.mirror canvas { cursor: none; }
+
 .overlay {
   position: absolute;
   inset: 0;
