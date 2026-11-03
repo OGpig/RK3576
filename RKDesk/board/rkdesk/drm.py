@@ -114,6 +114,15 @@ class DrmCapture:
         finally:
             self.lib.drmModeFreeCrtc(crtc)
 
+    def refresh(self) -> bool:
+        """Re-select the largest active CRTC (HDMI hotplug support)."""
+        crtc_id = self._find_crtc()
+        if crtc_id == self.crtc_id:
+            return False
+        self.crtc_id = crtc_id
+        self.width, self.height = self._crtc_size()
+        return True
+
     def grab(self) -> tuple[Image.Image, bytes]:
         crtc = self.lib.drmModeGetCrtc(self.fd, self.crtc_id)
         if not crtc:

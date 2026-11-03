@@ -63,6 +63,7 @@ class MirrorSource:
         self.capture = self._open_capture(device)
         self.width, self.height = self.capture.width, self.capture.height
         self.last_signature: bytes | None = None
+        self.last_refresh = 0.0
         self.input.send({"t": "resize", "w": self.width, "h": self.height})
         print(f"[rkdesk] mirror {self.width}x{self.height}")
 
@@ -78,6 +79,15 @@ class MirrorSource:
         raise RuntimeError(f"cannot open DRM capture: {last_error}")
 
     def grab(self) -> Image.Image | None:
+        now = time.monotonic()
+        if now - self.last_refresh > 2.0:
+            self.last_refresh = now
+            try:
+                if self.capture.refresh():
+                    self.last_signature = None
+                    print("[rkdesk] switched to a new active CRTC")
+            except Exception:
+                pass
         try:
             image, signature = self.capture.grab()
         except Exception:
