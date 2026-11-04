@@ -11,7 +11,7 @@ RKDesk 解决的是“Buildroot 精简系统没有 VNC，如何远程看真实�
 视频从 DRM/KMS 的 CRTC framebuffer 经 dma-buf 读取，JPEG over WebSocket 到浏览器；
 输入用 uinput 绝对鼠标/键盘注入 Weston；音频用 PulseAudio monitor 下行、null sink +
 remap source 做虚拟麦克风上行。Python 版功能完整，C 版做性能对比：
-同 CPU 下 30fps vs 15fps，内存 1.7MB vs 52MB。
+同 CPU 下 30fps vs 15fps，内存 7.8MB vs 52MB。
 
 ---
 
@@ -61,9 +61,10 @@ Python 版优先功能完整：视频、输入、音频、HTTPS、热插拔恢�
 解释器/对象/旋转后吞吐上限是多少”，并验证性能瓶颈。两者共享同一个输入守护进程，
 可以同时运行对比。
 
-**追问**：C 版为什么没有音频？
-本轮目标是视频/输入性能对比；音频涉及 Pulse 模块生命周期、WebAudio/HTTPS，
-放在 Python 版先保证功能完整。C 版要补音频需要移植 `av.py` 的状态机。
+**追问**：C 版音频怎么做的？
+C 版也实现 `/av`：`parec` 抓默认 sink monitor，`pacat` 写入 `rkdesk_c_mic` 并
+remap 成 `rkdesk_c_mic_source`；HTTPS 8444 用板端 libssl/libcrypto 提供安全的
+`getUserMedia` 上下文。虚拟麦克风名与 Python 版分开，避免互相清理。
 
 ---
 
@@ -319,7 +320,7 @@ HDMI 横向时 rotation=0，1920×1080 直接推流。C 版固定启动时 CRTC�
 
 - 音频换 Opus/WebRTC，降低延迟/带宽；
 - 视频用 H.264 硬编码 + WebRTC；
-- C 版补音频/HTTPS/热插拔；
+- C 版补 HDMI 热插拔、摄像头；
 - 加 token/认证/审计；
 - 摄像头 MJPEG/虚拟摄像头；
 - 自动化回归（四角点击、音频回环、分辨率切换）。
@@ -340,7 +341,7 @@ libinput 分类、uinput ABI、socket 状态、旋转公式任一层。方法是
 4. 旋转：800×1280 → rotate-90 → 1280×800 → 逆变换；
 5. 音频：sink → monitor → parec → WS → AudioContext；麦克风反向 null sink/remap；
 6. C：capture thread + client threads + TurboJPEG；
-7. 数字：15fps/52MB vs 30fps/1.7MB；音频 150–250ms。
+7. 数字：15fps/52MB vs 30fps/7.8MB；音频 150–250ms。
 
 ---
 
@@ -353,5 +354,5 @@ libinput 分类、uinput ABI、socket 状态、旋转公式任一层。方法是
 | “WebRTC 一定更低延迟” | 取决于编码/网络/缓冲；本项目局域网 WS+JPEG 足够 |
 | “tablet 和鼠标一样” | libinput 分类不同，桌面点击路径不同 |
 | “HTTPS 只是加密” | 这里还承担 secure context，解锁 getUserMedia |
-| “C 一定全面更快” | C 只做视频/输入；音频/HTTPS/热插拔仍在 Python |
+| “C 一定全面更快” | C 也做视频/输入/音频/HTTPS，但不处理 HDMI 热插拔/摄像头 |
 | “音频是抓扬声器” | 抓的是 sink monitor 混音，不需要物理扬声器 |

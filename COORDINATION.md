@@ -63,7 +63,7 @@ Weston（会关闭板端当前打开的窗口）。
   浏览器 PCM → `rkdesk_mic_source`（2s/205KB，峰值 10950）；
 - 服务强停后重启，虚拟源模块被清理、默认录音源恢复为物理麦克风；
 - HTTPS 8443 自签名证书可用，无头 Edge 中 `isSecureContext=true`，假麦克风可推流；
-- C 版 8089：30fps、q78/4:2:2、CPU 64.3%、RSS 1.7MB；Python 同条件 15fps、64.8%、52MB；
+- C 版 8089：30fps、q78/4:2:2、CPU 64.3%、RSS 7.8MB；Python 同条件 15fps、64.8%、52MB；
   C 空闲无客户端时 0% CPU。
 
 ## 音频链路（PulseAudio 16.1）
@@ -91,9 +91,10 @@ Weston（会关闭板端当前打开的窗口）。
 `/opt/rkdesk/rkdesk_c`，但**不自动启动**。
 
 实测（q78 / 4:2:2 / 6 秒拖动）：Python 15.0fps、807kbps、53.8KB/帧、CPU64.8%、RSS52MB；
-C 29.8fps、1660kbps、55.7KB/帧、CPU64.3%、RSS1.7MB；无客户端时 C 暂停编码（0% CPU）。
+C 29.8fps、1660kbps、55.7KB/帧、CPU64.3%、RSS7.8MB；无客户端时 C 暂停编码（0% CPU）。
+C 音频：/av 2.4s/441KB 峰值2810；虚拟麦 2s/201KB 峰值10962；HTTPS 8444 可用。
 
-C 版没有音频/HTTPS/虚拟麦克风，也不处理 HDMI 热插拔/CRTC 切换；这些仍由 Python 8088 提供。
+C 版已实现 Pulse 音频、虚拟麦克风（rkdesk_c_mic_source）和 HTTPS 8444；仍不处理 HDMI 热插拔/CRTC 切换。
 
 ## 已修复的输入问题
 

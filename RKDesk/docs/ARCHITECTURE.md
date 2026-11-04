@@ -69,7 +69,7 @@ flowchart LR
 | 带宽 | 约 807 kbps（q78） | 约 1660 kbps（q78/4:2:2） |
 | 服务端 encode | 15.9 ms | 20.7 ms |
 | 进程 CPU | 64.8% | 64.3% |
-| 进程 RSS | 52 MB | 1.7 MB |
+| 进程 RSS | 52 MB | 7.8 MB |
 | 音频 | 48 kHz PCM 双工 + 虚拟麦克风 | 无（仅画面/输入） |
 
 ---
@@ -90,7 +90,7 @@ flowchart LR
 - 不是多租户云桌面；默认单用户/可信局域网。
 - 当前不做摄像头视频采集（硬件无 sensor；后续接 USB UVC 可扩展）。
 - 不做互联网级认证/审计；跨网需 SSH 隧道或额外网关。
-- C 版暂不覆盖音频/HTTPS/HDMI 热插拔，只作为画面/输入性能通道。
+- C 版覆盖视频/输入/音频/HTTPS，但不处理 HDMI 热插拔与摄像头。
 
 ### 约束
 
@@ -254,7 +254,7 @@ flowchart LR
 ### Python 与 C 双实现
 
 - Python 版：功能完整（视频、输入、音频、HTTPS、热插拔恢复），开发效率高；
-- C 版：只做视频/输入，验证“去掉解释器/拷贝/旋转后的吞吐上限”；
+- C 版：视频 + 输入 + Pulse 音频 + TLS 8444，验证“去掉解释器/拷贝/旋转后的吞吐上限”；
 - 二者共享同一个输入守护进程和同一块 DRM 屏幕，可同时运行对比。
 
 ---
@@ -581,6 +581,13 @@ lib.wet_main(len(argv), array, None)
 
 ![C 版 8089 页面](c-browser.png)
 
+C 版同样提供 `/av`：
+
+- 板端→浏览器：`parec` 抓默认 sink 的 monitor，PCM 48k/2ch；
+- 浏览器→板端：`pacat` 写入 `rkdesk_c_mic` null sink，remap 为
+  `rkdesk_c_mic_source`（RKDesk_C_Microphone）；
+- HTTPS 8444 用板端已有 `libssl.so.3`/`libcrypto.so.3`，为 `getUserMedia` 提供安全上下文。
+
 ### 线程模型
 
 ```mermaid
@@ -633,7 +640,7 @@ C 页面发的是输入守护进程的原生协议：
 - 主机无 gcc/交叉工具链；Bootlin Linux ELF 在 Windows 不能执行；
 - 使用 **Zig Windows 0.13**：`zig cc -target aarch64-linux-gnu`；
 - 链接板端 `libturbojpeg.so.0`（手写最小 TurboJPEG ABI 声明，不需要 dev 头文件）；
-- 产物 72 KB，动态链接 glibc + libturbojpeg。
+- 产物约 119 KB，动态链接 glibc + libturbojpeg + libssl/libcrypto。
 
 ---
 
@@ -655,7 +662,7 @@ C 页面发的是输入守护进程的原生协议：
 | 平均帧 | 53.8 KB | 55.7 KB |
 | encode | 15.9 ms | 20.7 ms |
 | CPU | 64.8% | 64.3% |
-| RSS | 52 MB | **1.7 MB** |
+| RSS | 52 MB | **7.8 MB** |
 
 ### 解释
 
@@ -697,7 +704,7 @@ C 页面发的是输入守护进程的原生协议：
 | --- | --- | --- |
 | 摄像头 | 未接入；无 sensor | USB UVC + OpenCV MJPEG/WS |
 | 音频编码 | 裸 PCM | Opus/WebRTC，降带宽/延迟 |
-| C 版功能 | 仅视频/输入 | 移植音频/HTTPS/热插拔 |
+| C 版功能 | 视频/输入/音频/HTTPS | 补 HDMI 热插拔、摄像头 |
 | HDMI 热插拔 | Python 支持，C 不支持 | C 定时 refresh CRTC |
 | 多用户 | 共享输入/屏幕 | 会话隔离、权限、审计 |
 | 认证 | 无 | token、TLS 客户端证书、反代 |

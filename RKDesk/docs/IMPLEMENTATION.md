@@ -588,20 +588,21 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 
 Python 版功能完整，但每帧有解释器/对象/拷贝开销。C 版用来回答：
 
-> 如果去掉 Python 层，只保留 DRM + JPEG + WS，吞吐能到多少？
+> 如果去掉 Python 层，只保留 DRM + JPEG + WS + Pulse/TLS，吞吐能到多少？
 
 ### 工具链问题
 
 - 主机无 gcc/clang/交叉工具链；
 - Bootlin aarch64 是 **Linux ELF**，Windows Git Bash 不能执行；
 - 最终方案：**Zig Windows 0.13** `zig cc -target aarch64-linux-gnu`；
-- 链接板端 `libturbojpeg.so.0`，手写最小 TurboJPEG ABI 声明，不需要 dev 头文件。
+- 链接板端 `libturbojpeg.so.0`、`libssl.so.3`、`libcrypto.so.3`，
+  手写最小 TurboJPEG/OpenSSL ABI 声明，不需要 dev 头文件。
 
 ```mermaid
 flowchart LR
     A["rkdesk_c.c"] --> B["zig cc<br/>aarch64-linux-gnu"]
-    C["board-libs/libturbojpeg.so.0"] --> B
-    B --> D["rkdesk_c<br/>72KB ELF"]
+    C["board-libs/libturbojpeg.so.0<br/>libssl.so.3/libcrypto.so.3"] --> B
+    B --> D["rkdesk_c<br/>119KB ELF"]
     D -->|scp| E["/opt/rkdesk/rkdesk_c"]
 ```
 
@@ -667,7 +668,7 @@ if (!has_clients) {
 | 帧大小 | 53.8 KB | 55.7 KB |
 | encode | 15.9 ms | 20.7 ms |
 | CPU | 64.8% | 64.3% |
-| RSS | 52 MB | 1.7 MB |
+| RSS | 52 MB | 7.8 MB |
 
 ---
 
@@ -998,9 +999,9 @@ ps -o pid,%cpu,rss,args -p <pid>
 ### 性能结论
 
 - Python：功能完整，15fps，52MB；
-- C：视频/输入对比，30fps，1.7MB；
+- C：视频/输入/音频，30fps，7.8MB（含 TLS）；
 - 同 CPU 下 C 吞吐约为 Python 的 2 倍；
-- 音频/HTTPS 仍由 Python 提供。
+- C 版也实现了 `/av` Pulse 音频与 HTTPS 8444；Python 仍是功能最完整的入口。
 
 ---
 
@@ -1011,7 +1012,7 @@ ps -o pid,%cpu,rss,args -p <pid>
 > RK3576 是 Buildroot 精简系统，没有 VNC。我们直接从 DRM/KMS 的 CRTC
 > framebuffer 通过 dma-buf 读真实 scanout，JPEG 经 WebSocket 推到浏览器；
 > 输入用 uinput 绝对鼠标/键盘，音频用 PulseAudio monitor + 虚拟麦克风。
-> Python 版功能完整，C 版做性能对比：同 CPU 下 30fps vs 15fps，内存 1.7MB vs 52MB。
+> Python 版功能完整，C 版做性能对比：同 CPU 下 30fps vs 15fps，内存 7.8MB vs 52MB。
 
 ### 白板顺序
 
@@ -1021,7 +1022,7 @@ ps -o pid,%cpu,rss,args -p <pid>
 4. 画旋转：原生 800×1280 → rotate-90 → 逻辑 1280×800 → 逆变换公式；
 5. 画音频：sink → monitor → parec → WS → AudioContext；麦克风反向 null sink/remap；
 6. 画 C：capture thread + client threads + TurboJPEG；
-7. 说数字：15fps/52MB vs 30fps/1.7MB；音频 150–250ms。
+7. 说数字：15fps/52MB vs 30fps/7.8MB；音频 150–250ms。
 
 ### 一句话总结每层
 

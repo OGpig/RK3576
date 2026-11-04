@@ -16,7 +16,7 @@ http://192.168.31.153:8088
 
 - 画面/鼠标键盘：`http://192.168.31.153:8088`
 - **双向音频（麦克风）**：`https://192.168.31.153:8443`（自签名证书，首次需手动信任）
-- **C 版性能对比**：`http://192.168.31.153:8089`（画面/输入，无音频）
+- **C 版性能对比**：`http://192.168.31.153:8089`（画面/输入）+ `https://192.168.31.153:8444`（音频/麦克风）
 
 ```bash
 # 重新部署（改代码后）
@@ -35,7 +35,7 @@ ssh rk3576
 | --- | --- | --- |
 | **RKDesk mirror** | ✅ 当前主力 | DRM 真实画面 + 绝对鼠标/键盘，端口 **8088** |
 | RKDesk virtual | 🧪 兜底 | `--mode virtual`，板端自绘桌面 + PTY，无 Weston 时可用 |
-| RKDesk C 8089 | 🧪 对比 | C + DRM + TurboJPEG，30fps/1.7MB，无音频，见 `RKDesk/c-src/` |
+| RKDesk C 8089/8444 | 🧪 对比 | C + DRM + TurboJPEG + Pulse 音频，30fps/7.8MB，见 `RKDesk/c-src/` |
 
 旧 `Visualisation/`（Node/noVNC + `board_agent.py` 旧 MVP）已删除，历史仍保留在 Git 中。
 

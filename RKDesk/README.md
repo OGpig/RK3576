@@ -37,7 +37,8 @@ HDMI 未接，接上后会自动切到 1920×1080 并自适应。
 ```text
 http://192.168.31.153:8088          # 画面 + 鼠标键盘
 https://192.168.31.153:8443         # 画面 + 鼠标键盘 + 双向音频（自签名证书）
-http://192.168.31.153:8089         # C 版画面/输入（性能对比，无音频）
+http://192.168.31.153:8089         # C 版画面/输入（性能对比）
+https://192.168.31.153:8444        # C 版音频/麦克风（自签名证书）
 ```
 
 点击画面后即可用本机鼠标/键盘操作板端。界面包括：
@@ -140,7 +141,7 @@ tail -f /var/log/rkdesk.log
 - 测试音能听到 → 板端采集和 Windows 播放链路正常；听不到先检查 Windows 输出设备/音量。
 - 测试音正常但视频无声 → 检查视频播放器是否静音、视频是否含音轨、站点是否自动播放静音。
 - 这份 Chromium 126 已确认支持 AAC / H.264 / MP3 / Opus；不是编码不支持。
-- **C 版 8089 没有音频**，听声音请用 Python 版 HTTPS 8443。
+- **C 版音频走 HTTPS 8444**（8089 页面也能听，麦克风需 8444）。
 
 ### 限制
 
@@ -155,7 +156,8 @@ tail -f /var/log/rkdesk.log
 
 `c-src/` 是一份独立的板端 C 实现：直接 DRM ioctl 取 scanout，`libjpeg-turbo` 编码，
 8089 端口提供页面/WebSocket/健康接口，输入复用现有 `rkdesk_input.py`。
-它不含音频/HTTPS，用于和 Python 版对比画面吞吐与资源占用。
+它包含与 Python 版等价的 PulseAudio 双工音频和 HTTPS 8444；
+用于和 Python 版对比画面吞吐/资源占用。
 
 ```bash
 cd RKDesk/c-src
@@ -177,9 +179,9 @@ ssh root@192.168.31.153 '
 | 平均帧 | 53.8 KB | 55.7 KB |
 | encode | 15.9 ms | 20.7 ms |
 | CPU | 64.8% | 64.3% |
-| RSS | 52 MB | **1.7 MB** |
+| RSS | 52 MB | **7.8 MB** |
 
-C 版在相近 CPU 下帧率翻倍、内存约 1/30；细节和构建说明见
+C 版在相近 CPU 下帧率翻倍、内存约 1/7；细节和构建说明见
 [`c-src/README.md`](c-src/README.md)。
 
 ## 性能（实测）
@@ -267,8 +269,8 @@ RKDesk/
 │     └─ terminal.py         # 虚拟模式 PTY 终端
 ├─ web/                      # 浏览器客户端（无构建步骤）
 │  └─ av.js                  # 音频 WebSocket / AudioWorklet
-├─ c-src/                    # C 版镜像（8089）
-│  ├─ rkdesk_c.c             # DRM + TurboJPEG + WebSocket
+├─ c-src/                    # C 版镜像（8089 / 8444）
+│  ├─ rkdesk_c.c             # DRM + TurboJPEG + WS + Pulse 音频 + TLS
 │  ├─ build.sh               # Zig aarch64 交叉编译
 │  └─ README.md
 ├─ deploy.sh                 # tar over SSH 部署
@@ -292,6 +294,7 @@ RKDesk/
    ├─ browser-live.png       # 浏览器事件链路输入验证
    ├─ browser-audio.png      # 音频面板与双向音频状态
    ├─ c-browser.png          # C 版 8089 页面
+   ├─ c-audio.png            # C 版音频控件
    ├─ c-after.png            # C 版点击 Chromium 验证
    ├─ screen.jpg             # 真实桌面原图（1280×800）
    ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
@@ -306,8 +309,9 @@ RKDesk/
 
 ## 已知限制
 
-- 没有音频转发；板端声卡节点存在，但未接扬声器。
-- 默认无认证、无 TLS，仅限可信局域网；跨网请用 SSH 隧道或 `--token`。
+- 板端没有物理扬声器/麦克风；音频走 Pulse monitor + 虚拟麦克风，本地播放不会从板子出声。
+- 摄像头未接入（无 USB 摄像头/sensor）。
+- 默认无认证；HTTPS 为自签名证书，仅限可信局域网；跨网请用 SSH 隧道或 `--token`。
 - 浏览器到板端的键盘是按键级注入，中文/emoji 需要板端 IME。
 - 服务重启不会重启 Weston；但重启输入守护进程会重建设备，Weston 需要重启才能看到新设备
   （脚本已自动处理，会丢失当前打开的窗口）。

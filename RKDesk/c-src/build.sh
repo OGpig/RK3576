@@ -11,15 +11,17 @@ if [ ! -x "$ZIG" ]; then
     echo "Set ZIG=/path/to/zig.exe" >&2
     exit 1
 fi
-if [ ! -f "$LIBDIR/libturbojpeg.so.0" ]; then
-    echo "libturbojpeg.so.0 not found in $LIBDIR" >&2
-    echo "Copy it from the board: scp root@192.168.31.153:/usr/lib/libturbojpeg.so.0 $LIBDIR/" >&2
-    exit 1
-fi
+for lib in libturbojpeg.so.0 libssl.so.3 libcrypto.so.3; do
+    if [ ! -f "$LIBDIR/$lib" ]; then
+        echo "$lib not found in $LIBDIR" >&2
+        echo "Copy it from the board: scp root@192.168.31.153:/usr/lib/$lib $LIBDIR/" >&2
+        exit 1
+    fi
+done
 
 "$ZIG" cc -target aarch64-linux-gnu -O3 -pthread \
-    -L "$LIBDIR" -l:libturbojpeg.so.0 \
-    "$ROOT/rkdesk_c.c" -o "$ROOT/rkdesk_c"
+    -L "$LIBDIR" -l:libturbojpeg.so.0 -l:libssl.so.3 -l:libcrypto.so.3 \
+    "$ROOT/rkdesk_c.c" -lm -o "$ROOT/rkdesk_c"
 
 ls -lh "$ROOT/rkdesk_c"
 echo "built $ROOT/rkdesk_c"

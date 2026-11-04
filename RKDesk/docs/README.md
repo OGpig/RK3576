@@ -64,9 +64,10 @@ flowchart LR
 | 合成器 | Weston 14.0.1，DSI 原生 800×1280，逻辑 1280×800 |
 | 音频 | PulseAudio 16.1，ES8388 sink/source；无物理扬声器/麦克风 |
 | Python 版 | 8088 HTTP / 8443 HTTPS，功能完整 |
-| C 版 | 8089，视频/输入性能对比，无音频 |
+| C 版 | 8089 + HTTPS 8444，视频/输入/音频，Pulse 虚拟麦克风 |
 | Python 性能 | 15.0 fps / 807 kbps / 52 MB / CPU 64.8% |
-| C 性能 | 29.8 fps / 1660 kbps / 1.7 MB / CPU 64.3% |
+| C 性能 | 29.8 fps / 1660 kbps / 7.8 MB / CPU 64.3% |
+| C 音频 | `/av` PCM 双工 + `rkdesk_c_mic_source`，HTTPS 8444 |
 
 ## 图表索引
 
