@@ -21,3 +21,6 @@ __pycache__/
 
 # Generated TLS certificate (never commit the private key)
 RKDesk/deploy/certs/
+
+# C build output (architecture specific)
+RKDesk/c-src/rkdesk_c

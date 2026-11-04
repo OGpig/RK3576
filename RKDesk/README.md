@@ -30,6 +30,7 @@ HDMI 未接，接上后会自动切到 1920×1080 并自适应。
 ```text
 http://192.168.31.153:8088          # 画面 + 鼠标键盘
 https://192.168.31.153:8443         # 画面 + 鼠标键盘 + 双向音频（自签名证书）
+http://192.168.31.153:8089         # C 版画面/输入（性能对比，无音频）
 ```
 
 点击画面后即可用本机鼠标/键盘操作板端。界面包括：
@@ -125,6 +126,15 @@ tail -f /var/log/rkdesk.log
 
 `/api/av` 返回 Pulse 状态、可选源、虚拟麦克风状态；`/av` 为 PCM 双工 WebSocket。
 
+### 视频没声音？
+
+- **板端没有扬声器/麦克风**。直接在板端 Chromium 里播放视频，板子本身不会出声；
+  需要在 Windows 的远程页面里点顶栏「声音」。
+- 测试音能听到 → 板端采集和 Windows 播放链路正常；听不到先检查 Windows 输出设备/音量。
+- 测试音正常但视频无声 → 检查视频播放器是否静音、视频是否含音轨、站点是否自动播放静音。
+- 这份 Chromium 126 已确认支持 AAC / H.264 / MP3 / Opus；不是编码不支持。
+- **C 版 8089 没有音频**，听声音请用 Python 版 HTTPS 8443。
+
 ### 限制
 
 - 自签名证书需要手动信任；若浏览器仍禁用麦克风，可用 SSH 隧道访问
@@ -133,6 +143,37 @@ tail -f /var/log/rkdesk.log
 - 已打开的板端应用可能缓存旧录音源，需要重新打开录音页面。
 - 延迟约 150–250 ms（Pulse + WebSocket + 80 ms 播放缓冲）。
 - 摄像头视频尚未接入；当前硬件没有 sensor，接 USB 摄像头后可扩展 MJPEG 预览。
+
+## C 版镜像（8089，性能对比）
+
+`c-src/` 是一份独立的板端 C 实现：直接 DRM ioctl 取 scanout，`libjpeg-turbo` 编码，
+8089 端口提供页面/WebSocket/健康接口，输入复用现有 `rkdesk_input.py`。
+它不含音频/HTTPS，用于和 Python 版对比画面吞吐与资源占用。
+
+```bash
+cd RKDesk/c-src
+bash build.sh                  # Zig aarch64 + 板端 libturbojpeg
+# deploy.sh 会把已编译的 rkdesk_c 复制到 /opt/rkdesk/
+ssh root@192.168.31.153 '
+  pkill -x rkdesk_c 2>/dev/null || true
+  nohup /opt/rkdesk/rkdesk_c --port 8089 --fps 30 --quality 78 --subsamp 422 \
+      >/var/log/rkdesk-c.log 2>&1 &
+'
+```
+
+实测（q78 / 4:2:2 / 6 秒拖动）：
+
+| 指标 | Python 8088 | C 8089 |
+| --- | --- | --- |
+| 帧率 | 15.0 fps | **29.8 fps** |
+| 带宽 | 807 kbps | 1660 kbps |
+| 平均帧 | 53.8 KB | 55.7 KB |
+| encode | 15.9 ms | 20.7 ms |
+| CPU | 64.8% | 64.3% |
+| RSS | 52 MB | **1.7 MB** |
+
+C 版在相近 CPU 下帧率翻倍、内存约 1/30；细节和构建说明见
+[`c-src/README.md`](c-src/README.md)。
 
 ## 性能（实测）
 
@@ -219,6 +260,10 @@ RKDesk/
 │     └─ terminal.py         # 虚拟模式 PTY 终端
 ├─ web/                      # 浏览器客户端（无构建步骤）
 │  └─ av.js                  # 音频 WebSocket / AudioWorklet
+├─ c-src/                    # C 版镜像（8089）
+│  ├─ rkdesk_c.c             # DRM + TurboJPEG + WebSocket
+│  ├─ build.sh               # Zig aarch64 交叉编译
+│  └─ README.md
 ├─ deploy.sh                 # tar over SSH 部署
 ├─ deploy/
 │  ├─ S48rkdesk-input        # 输入设备，早于 Weston
@@ -239,6 +284,8 @@ RKDesk/
    ├─ browser-panel.png      # 板端状态侧栏
    ├─ browser-live.png       # 浏览器事件链路输入验证
    ├─ browser-audio.png      # 音频面板与双向音频状态
+   ├─ c-browser.png          # C 版 8089 页面
+   ├─ c-after.png            # C 版点击 Chromium 验证
    ├─ screen.jpg             # 真实桌面原图（1280×800）
    ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
    ├─ board-sync.txt         # 19/19 板端脚本校验结果

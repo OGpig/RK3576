@@ -43,6 +43,13 @@ if [ -s "$CERT_DIR/rkdesk.crt" ] && [ -s "$CERT_DIR/rkdesk.key" ]; then
         | ssh "$HOST" "mkdir -p /opt/rkdesk/certs && tar -xf - -C /tmp && cp /tmp/deploy/certs/rkdesk.crt /tmp/deploy/certs/rkdesk.key /opt/rkdesk/certs/ && chmod 644 /opt/rkdesk/certs/rkdesk.crt && chmod 600 /opt/rkdesk/certs/rkdesk.key"
 fi
 
+if [ -x "$ROOT/c-src/rkdesk_c" ]; then
+    if scp -q "$ROOT/c-src/rkdesk_c" "$HOST:/opt/rkdesk/rkdesk_c"; then
+        ssh "$HOST" "chmod 755 /opt/rkdesk/rkdesk_c"
+        echo "[deploy] installed optional C mirror at /opt/rkdesk/rkdesk_c"
+    fi
+fi
+
 tar -C "$ROOT" -cf - deploy/S48rkdesk-input deploy/S49weston deploy/S99rkdesk deploy/weston deploy/99-rkdesk-rotate.ini \
     | ssh "$HOST" "
         tar -xf - -C /tmp &&

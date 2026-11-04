@@ -14,6 +14,7 @@
 | `/opt/rkdesk/rkdesk_input.py` | `board/rkdesk_input.py` | 输入守护进程 |
 | `/opt/rkdesk/rkdesk/*.py` | `board/rkdesk/*.py` | 抓屏、输入、音频、虚拟桌面等模块 |
 | `/opt/rkdesk/web/*` | `web/*` | 浏览器客户端（含 `av.js` 音频） |
+| `/opt/rkdesk/rkdesk_c` | `c-src/rkdesk_c`（本地编译，不入库） | C 对比服务（8089），手动启动 |
 | `/opt/rkdesk/certs/rkdesk.crt` | `deploy/certs/`（部署时生成） | HTTPS 自签名证书，不提交仓库 |
 | `/opt/rkdesk/certs/rkdesk.key` | `deploy/certs/`（部署时生成） | 私钥，权限 600，不提交仓库 |
 

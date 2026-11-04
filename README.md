@@ -16,6 +16,7 @@ http://192.168.31.153:8088
 
 - 画面/鼠标键盘：`http://192.168.31.153:8088`
 - **双向音频（麦克风）**：`https://192.168.31.153:8443`（自签名证书，首次需手动信任）
+- **C 版性能对比**：`http://192.168.31.153:8089`（画面/输入，无音频）
 
 ```bash
 # 重新部署（改代码后）
@@ -34,6 +35,7 @@ ssh rk3576
 | --- | --- | --- |
 | **RKDesk mirror** | ✅ 当前主力 | DRM 真实画面 + 绝对鼠标/键盘，端口 **8088** |
 | RKDesk virtual | 🧪 兜底 | `--mode virtual`，板端自绘桌面 + PTY，无 Weston 时可用 |
+| RKDesk C 8089 | 🧪 对比 | C + DRM + TurboJPEG，30fps/1.7MB，无音频，见 `RKDesk/c-src/` |
 
 旧 `Visualisation/`（Node/noVNC + `board_agent.py` 旧 MVP）已删除，历史仍保留在 Git 中。
 
@@ -65,5 +67,6 @@ Audio      : PulseAudio 16.1（ES8388 sink monitor + RKDesk 虚拟麦克风）
   `/usr/bin/weston.damaged.20261103`，详见 `RKDesk/README.md`。
 - 旧 `board_agent.py` 不在仓库中；板端副本位于 `/tmp`，重启后自动消失。
   若板子热重连后仍看到 8765 端口，可执行 `kill $(pgrep -f /tmp/board_agent.py)` 停掉。
+- **板端没有扬声器/麦克风**：本地播放视频不会从板子出声；请在 HTTPS 远程页面点「声音」。
 - 默认无认证，仅限局域网；跨网请用 SSH 隧道。
 - 音频走自签名 HTTPS 8443；若浏览器仍禁用麦克风，可 SSH 隧道访问 `http://localhost:8088`。
