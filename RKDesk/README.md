@@ -6,6 +6,13 @@
 
 ![浏览器中的真实板端桌面](docs/browser-mirror.png)
 
+## 完整文档
+
+- [系统说明：架构、链路、决策、性能](docs/ARCHITECTURE.md)
+- [实现步骤：分阶段、逐模块、15 个故障复盘](docs/IMPLEMENTATION.md)
+- [答辩/面试问答：40 个技术细节](docs/INTERVIEW_QA.md)
+- [文档中心与阅读路径](docs/README.md)
+
 当前实测环境：TL3576-MiniEVM，Buildroot 2024.02，Weston 14.0.1。
 DSI-1 原生 800×1280，Weston 以 `rotate-90` 合成出 **1280×800 横向桌面**；
 HDMI 未接，接上后会自动切到 1920×1080 并自适应。
@@ -289,6 +296,10 @@ RKDesk/
    ├─ screen.jpg             # 真实桌面原图（1280×800）
    ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
    ├─ board-sync.txt         # 19/19 板端脚本校验结果
+   ├─ ARCHITECTURE.md       # 系统说明
+   ├─ IMPLEMENTATION.md     # 实现步骤/原理/故障复盘
+   ├─ INTERVIEW_QA.md       # 答辩/面试问答
+   ├─ README.md             # 文档中心
    ├─ env-report.txt
    └─ mlsys-ide-setup.md
 ```

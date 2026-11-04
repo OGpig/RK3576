@@ -56,6 +56,9 @@ Audio      : PulseAudio 16.1（ES8388 sink monitor + RKDesk 虚拟麦克风）
 ## 文档
 
 - [RKDesk 设计、抓屏/输入原理、性能与限制](RKDesk/README.md)
+- [系统说明：架构、链路、决策、性能](RKDesk/docs/ARCHITECTURE.md)
+- [实现步骤：分阶段、逐模块、15 个故障复盘](RKDesk/docs/IMPLEMENTATION.md)
+- [答辩/面试问答：40 个技术细节](RKDesk/docs/INTERVIEW_QA.md)
 - [mlsysbook IDE Setup 实验（RK3576 版）](RKDesk/docs/mlsys-ide-setup.md)
 - [板端环境校验报告](RKDesk/docs/env-report.txt)
 - [并发开发协作说明](COORDINATION.md)
