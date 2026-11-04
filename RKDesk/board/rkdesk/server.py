@@ -13,6 +13,7 @@ import pty
 import queue
 import signal
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -26,13 +27,14 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
+from .av import AVHub, MIC_FRAME
 from .desktop import Desktop, HEIGHT, WIDTH
 from .mirror import MirrorSource
 
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, "web")
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 
 def local_ip() -> str:
@@ -109,6 +111,55 @@ class WSClient:
 
     def send_frame(self, jpeg: bytes) -> None:
         self._put(0x2, jpeg)
+
+    def send_text(self, text: str) -> None:
+        self._put(0x1, text.encode())
+
+    def close(self) -> None:
+        self.alive = False
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+class AudioClient:
+    """Low-latency PCM socket; drops the oldest chunk instead of blocking."""
+
+    def __init__(self, sock: socket.socket, address) -> None:
+        self.sock = sock
+        self.address = address
+        self.queue: queue.Queue = queue.Queue(maxsize=24)
+        self.alive = True
+        self.thread = threading.Thread(target=self._sender, name=f"av-{address[1]}", daemon=True)
+        self.thread.start()
+
+    def _sender(self) -> None:
+        while self.alive:
+            try:
+                opcode, payload = self.queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                self.sock.sendall(ws_packet(opcode, payload))
+            except OSError:
+                self.alive = False
+                break
+
+    def _put(self, opcode: int, payload: bytes) -> None:
+        if not self.alive:
+            return
+        try:
+            self.queue.put_nowait((opcode, payload))
+        except queue.Full:
+            try:
+                self.queue.get_nowait()
+                self.queue.put_nowait((opcode, payload))
+            except (queue.Empty, queue.Full):
+                pass
+
+    def send_audio(self, pcm: bytes) -> None:
+        self._put(0x2, pcm)
 
     def send_text(self, text: str) -> None:
         self._put(0x1, text.encode())
@@ -215,6 +266,7 @@ class App:
         self.target_fps = args.fps
         self.token = args.token
         self.mode = args.mode
+        self.av = AVHub(https_port=getattr(args, "https_port", 8443))
         self.desktop = Desktop(args.width, args.height)
         self.desktop.show_cursor = args.show_cursor
         self.shell = Shell(self.desktop)
@@ -464,6 +516,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/ws":
             self._websocket(parsed)
             return
+        if path == "/av":
+            self._audio_websocket(parsed)
+            return
+        if path == "/api/av":
+            self._json(APP.av.status())
+            return
         if path == "/healthz":
             self._json({
                 "ok": True, "version": VERSION, "mode": APP.mode,
@@ -471,6 +529,9 @@ class Handler(BaseHTTPRequestHandler):
                 "clients": len(APP.clients), "fps": round(APP.fps, 1),
                 "encode_ms": round(APP.encode_ms, 1), "quality": APP.quality,
                 "shell": APP.desktop.shell_alive,
+                "audio": APP.av.pulse.ok,
+                "virtual_mic": APP.av.mic.active,
+                "https_port": APP.av.https_port,
                 "uptime": int(time.time() - APP.started),
             })
             return
@@ -567,17 +628,17 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     # ---- websocket
-    def _websocket(self, parsed) -> None:
+    def _begin_websocket(self, parsed):
         if APP.token:
             token = parse_qs(parsed.query).get("token", [""])[0]
             if token != APP.token:
                 self.send_error(HTTPStatus.UNAUTHORIZED, "bad token")
-                return
+                return None
         key = self.headers.get("Sec-WebSocket-Key")
         upgrade = (self.headers.get("Upgrade") or "").lower()
         if not key or upgrade != "websocket":
             self.send_error(HTTPStatus.BAD_REQUEST, "websocket required")
-            return
+            return None
         accept = base64.b64encode(hashlib.sha1((key + GUID).encode()).digest()).decode()
         self.send_response(HTTPStatus.SWITCHING_PROTOCOLS)
         self.send_header("Upgrade", "websocket")
@@ -587,10 +648,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.wfile.flush()
         except OSError:
-            return
+            return None
         self.close_connection = True
         sock = self.connection
         sock.settimeout(None)
+        return sock
+
+    def _websocket(self, parsed) -> None:
+        sock = self._begin_websocket(parsed)
+        if sock is None:
+            return
         client = WSClient(sock, self.client_address)
         APP.add_client(client)
         try:
@@ -622,6 +689,45 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             APP.remove_client(client)
 
+    def _audio_websocket(self, parsed) -> None:
+        sock = self._begin_websocket(parsed)
+        if sock is None:
+            return
+        client = AudioClient(sock, self.client_address)
+        APP.av.add_client(client)
+        try:
+            while client.alive:
+                frame = self._read_frame(sock)
+                if frame is None:
+                    break
+                opcode, payload = frame
+                if opcode == 0x8:
+                    try:
+                        sock.sendall(ws_packet(0x8, b""))
+                    except OSError:
+                        pass
+                    break
+                if opcode == 0x9:
+                    client._put(0xA, payload)
+                    continue
+                if opcode == 0xA:
+                    continue
+                if opcode == 0x1:
+                    try:
+                        message = json.loads(payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if isinstance(message, dict):
+                        APP.av.handle(client, message)
+                elif opcode == 0x2:
+                    if len(payload) <= MIC_FRAME * 8:
+                        APP.av.handle_binary(client, payload)
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            APP.av.remove_client(client)
+            client.close()
+
     @staticmethod
     def _read_frame(sock: socket.socket):
         header = recv_exact(sock, 2)
@@ -647,6 +753,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="RKDesk remote desktop server")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8088)
+    parser.add_argument("--https-port", type=int, default=8443)
+    parser.add_argument("--cert", default="/opt/rkdesk/certs/rkdesk.crt")
+    parser.add_argument("--key", default="/opt/rkdesk/certs/rkdesk.key")
     parser.add_argument("--mode", choices=("mirror", "virtual"), default="mirror",
                         help="mirror: real DRM screen; virtual: board-rendered desktop")
     parser.add_argument("--device", default="/dev/dri/card0")
@@ -672,17 +781,39 @@ def main() -> None:
     server.daemon_threads = True
     print(f"[rkdesk] v{VERSION} mode={APP.mode} listening on http://{args.host}:{args.port} "
           f"({APP.width}x{APP.height}@{args.fps:g}fps q{args.quality})")
+
+    https_server = None
+    if args.https_port and os.path.exists(args.cert) and os.path.exists(args.key):
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(args.cert, args.key)
+            https_server = ThreadingHTTPServer((args.host, args.https_port), Handler)
+            https_server.daemon_threads = True
+            https_server.socket = context.wrap_socket(https_server.socket, server_side=True)
+            threading.Thread(target=https_server.serve_forever, daemon=True,
+                             name="https").start()
+            print(f"[rkdesk] https listening on https://{args.host}:{args.https_port}")
+        except Exception as error:  # noqa: BLE001 - HTTPS is optional
+            print(f"[rkdesk] https disabled: {error}")
+            https_server = None
+    else:
+        print("[rkdesk] https disabled (certificate not found)")
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         APP.running = False
+        APP.av.close()
         if APP.mode == "virtual":
             APP.shell.stop()
         if APP.mirror:
             APP.mirror.close()
         server.server_close()
+        if https_server:
+            https_server.shutdown()
+            https_server.server_close()
 
 
 if __name__ == "__main__":

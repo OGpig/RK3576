@@ -30,6 +30,8 @@
         <span id="fps" class="value">--</span>
       </div>
       <div class="top-actions">
+        <button id="audioBtn" class="icon-btn av-top" title="听板端声音">声音</button>
+        <button id="micBtn" class="icon-btn av-top" title="发送本机麦克风">麦克风</button>
         <button id="panelToggle" class="icon-btn" title="板端信息">信息</button>
         <button id="restart" class="icon-btn" title="重新连接">重连</button>
       </div>
@@ -58,6 +60,35 @@
           <span id="infoRes">1280×800</span>
           <small>当前输出 · 实时镜像</small>
         </div>
+
+        <section class="audio-card">
+          <div class="audio-head">
+            <h3>音频</h3>
+            <span id="avBadge" class="av-badge">检测中</span>
+          </div>
+
+          <div class="audio-controls">
+            <button id="audioToggle" class="av-btn">听板端声音</button>
+            <select id="audioSource" title="板端音频源"></select>
+          </div>
+          <label class="slider-row"><span>音量</span>
+            <input id="audioVolume" type="range" min="0" max="100" value="70">
+          </label>
+          <div class="meter"><i id="outMeter"></i></div>
+
+          <div class="audio-controls">
+            <button id="micToggle" class="av-btn">发送麦克风</button>
+            <span id="micState" class="muted">未启用</span>
+          </div>
+          <label class="slider-row"><span>增益</span>
+            <input id="micGain" type="range" min="0" max="200" value="100">
+          </label>
+          <div class="meter mic"><i id="inMeter"></i></div>
+
+          <p id="avNote" class="audio-note">正在检测板端音频…</p>
+          <a id="httpsLink" class="https-link" hidden>切换到 HTTPS 以启用麦克风 →</a>
+          <button id="testTone" class="av-link">播放板端测试音</button>
+        </section>
 
         <div class="info-grid">
           <div><label>主机</label><b id="infoHost">--</b></div>
@@ -132,5 +163,6 @@
 
   <textarea id="kbd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
   <script src="/app.js"></script>
+  <script src="/av.js"></script>
 </body>
 </html>

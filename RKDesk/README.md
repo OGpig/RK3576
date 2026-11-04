@@ -28,7 +28,8 @@ HDMI 未接，接上后会自动切到 1920×1080 并自适应。
 浏览器打开：
 
 ```text
-http://192.168.31.153:8088
+http://192.168.31.153:8088          # 画面 + 鼠标键盘
+https://192.168.31.153:8443         # 画面 + 鼠标键盘 + 双向音频（自签名证书）
 ```
 
 点击画面后即可用本机鼠标/键盘操作板端。界面包括：
@@ -89,7 +90,49 @@ tail -f /var/log/rkdesk.log
 - **静态省流**：画面不变时不编码、不发送（0 KB/s），变化时 15 fps。
 - **多客户端**：共享同一块板端屏幕（和 VNC 一样）。
 - **界面工具**：适应/1:1 缩放、画质切换、PNG 截图、板端状态侧栏。
+- **双向音频**：板端系统声音→浏览器；浏览器麦克风→板端虚拟麦克风（PulseAudio）。
 - **虚拟桌面兜底**：`--mode virtual` 可在没有 Weston/DRM 时使用板端自绘桌面。
+
+## 音频（双向）
+
+浏览器端提供「声音 / 麦克风」两个开关，顶栏和右侧「音频」卡片均可操作。
+
+- **板端 → Windows**：捕获 PulseAudio 默认 sink 的 monitor（系统播放），PCM S16LE
+  48 kHz 立体声经 `/av` WebSocket 推送，浏览器用 AudioContext 播放。可选「系统声音」
+  或「板端麦克风」作为源。
+- **Windows → 板端**：浏览器麦克风经 `getUserMedia` + AudioWorklet 采集，PCM S16LE
+  48 kHz 单声道回传；服务端用 `pacat` 写入 `rkdesk_mic` null sink，并暴露
+  `rkdesk_mic_source`（RKDesk Microphone）给板端应用，默认录音源会临时切到它。
+- **自动恢复**：麦克风停止、页面关闭或服务重启后恢复原默认源；服务被强停时，下次启动
+  从 `/var/run/rkdesk-mic.previous` 恢复。
+- **无硬件可用**：板端没有摄像头/扬声器/麦克风时，系统声音与虚拟麦克风仍然可用；
+  点「播放板端测试音」可验证整条链路。
+
+### 使用步骤
+
+1. 打开 **https://192.168.31.153:8443**（自签名证书，首次需「高级 → 继续访问」）。
+   HTTP 8088 只能听/看，浏览器会禁用麦克风（`getUserMedia` 需要安全上下文）。
+2. 点「声音」听板端系统播放；点「麦克风」并允许浏览器权限。
+3. 板端应用选择 `RKDesk Microphone` 作为录音设备；新启动的应用会自动使用默认源。
+4. 停止麦克风后，默认录音源恢复为板端物理麦克风。
+
+### 传输格式
+
+| 方向 | 格式 | 分片 |
+| --- | --- | --- |
+| 板端 → 浏览器 | S16LE / 48 kHz / 2ch | 20 ms = 3840 B |
+| 浏览器 → 板端 | S16LE / 48 kHz / 1ch | 20 ms = 1920 B |
+
+`/api/av` 返回 Pulse 状态、可选源、虚拟麦克风状态；`/av` 为 PCM 双工 WebSocket。
+
+### 限制
+
+- 自签名证书需要手动信任；若浏览器仍禁用麦克风，可用 SSH 隧道访问
+  `http://localhost:8088`（localhost 属于安全上下文）。Windows 也可以导入证书：
+  `certutil -addstore -user Root RKDesk\deploy\certs\rkdesk.crt`。
+- 已打开的板端应用可能缓存旧录音源，需要重新打开录音页面。
+- 延迟约 150–250 ms（Pulse + WebSocket + 80 ms 播放缓冲）。
+- 摄像头视频尚未接入；当前硬件没有 sensor，接 USB 摄像头后可扩展 MJPEG 预览。
 
 ## 性能（实测）
 
@@ -137,10 +180,12 @@ tail -f /var/log/rkdesk.log
 | --- | --- |
 | `GET /` | Web 客户端 |
 | `GET /healthz` | 模式、分辨率、客户端数、fps、编码耗时 |
+| `GET /api/av` | 音频源、PulseAudio、虚拟麦克风状态 |
 | `GET /api/stats` | 板端 CPU/内存/温度/磁盘 |
 | `GET /api/screenshot.jpg` | 当前真实屏幕单帧（脚本/文档用） |
 | `GET /api/debug` | 内部状态（模式、窗口/输入） |
 | `WS /ws` | JPEG 帧 + 输入事件 |
+| `WS /av` | PCM 双工音频（板端↔浏览器） |
 
 输入消息：
 
@@ -169,9 +214,11 @@ RKDesk/
 │     ├─ mirror.py           # DRM 抓屏 + 输入转发客户端
 │     ├─ drm.py              # KMS/dma-buf 抓帧
 │     ├─ input.py            # uinput 绝对鼠标 / 键盘
+│     ├─ av.py               # PulseAudio 双工音频 / 虚拟麦克风
 │     ├─ desktop.py          # 虚拟桌面兜底（--mode virtual）
 │     └─ terminal.py         # 虚拟模式 PTY 终端
 ├─ web/                      # 浏览器客户端（无构建步骤）
+│  └─ av.js                  # 音频 WebSocket / AudioWorklet
 ├─ deploy.sh                 # tar over SSH 部署
 ├─ deploy/
 │  ├─ S48rkdesk-input        # 输入设备，早于 Weston
@@ -191,9 +238,10 @@ RKDesk/
    ├─ browser-mirror.png     # 浏览器中的真实桌面
    ├─ browser-panel.png      # 板端状态侧栏
    ├─ browser-live.png       # 浏览器事件链路输入验证
+   ├─ browser-audio.png      # 音频面板与双向音频状态
    ├─ screen.jpg             # 真实桌面原图（1280×800）
    ├─ screen-terminal.jpg    # 板端 Wayland Terminal 执行命令
-   ├─ board-sync.txt         # 17/17 板端脚本校验结果
+   ├─ board-sync.txt         # 19/19 板端脚本校验结果
    ├─ env-report.txt
    └─ mlsys-ide-setup.md
 ```

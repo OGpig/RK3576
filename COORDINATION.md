@@ -58,7 +58,22 @@ Weston（会关闭板端当前打开的窗口）。
 - 抓帧 14.7 ms，JPEG q78 约 16 ms，服务 RSS 约 52 MB；
 - 重启 `S99rkdesk` 后 Weston PID 不变；
 - 重启 `S48rkdesk-input` 后服务端自动重连并重发 `resize 1280×800`，点击 Chromium 仍准确；
-- 光标可覆盖四角、Chromium 图标和底部面板，不再跳过区域。
+- 光标可覆盖四角、Chromium 图标和底部面板，不再跳过区域；
+- 双向音频：板端系统声音 monitor → `/av` PCM（2.8s/456KB，峰值 2810）；
+  浏览器 PCM → `rkdesk_mic_source`（2s/205KB，峰值 10950）；
+- 服务强停后重启，虚拟源模块被清理、默认录音源恢复为物理麦克风；
+- HTTPS 8443 自签名证书可用，无头 Edge 中 `isSecureContext=true`，假麦克风可推流。
+
+## 音频链路（PulseAudio 16.1）
+
+- `/av` WebSocket：板端→浏览器 S16LE 48k 2ch / 20ms（3840B）；
+  浏览器→板端 S16LE 48k 1ch / 20ms（1920B）。
+- 板端输出：`parec` 抓默认 sink 的 `.monitor`（系统播放）或物理 mic。
+- 浏览器麦克风：`pacat` 写入 `rkdesk_mic` null sink，`module-remap-source`
+  暴露 `rkdesk_mic_source`（RKDesk Microphone）；启动时把默认源切到它，停止时恢复。
+- 强停恢复：`/var/run/rkdesk-mic.previous` 记录原默认源，下次启动自动恢复并清理残留模块。
+- HTTPS：`deploy.sh` 用主机 `openssl` 生成带 SAN 的自签名证书到 `/opt/rkdesk/certs`，
+  私钥不入库；HTTP 8088 仍保留，麦克风需 8443 或 localhost。
 
 ## 已修复的输入问题
 

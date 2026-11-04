@@ -128,20 +128,18 @@ class MirrorSource:
         return False
 
     def _ensure_weston(self) -> None:
-        # At boot S49weston starts in parallel with this service.  Wait for it
-        # instead of spawning a second compositor on the same DRM device.
+        # At boot S49weston and this service race.  Always wait for the socket
+        # first: if S49 is already starting, this avoids a second compositor.
+        if self._wait_for_socket(10.0):
+            return
         if self._weston_process_running():
-            print("[rkdesk] waiting for the existing weston", flush=True)
-            if self._wait_for_socket(8.0):
-                return
-            print("[rkdesk] weston socket timeout, restarting", flush=True)
+            print("[rkdesk] weston process without socket, restarting", flush=True)
             subprocess.run(["/etc/init.d/S49weston", "restart"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-            self._wait_for_socket(6.0)
-            return
-        print("[rkdesk] starting weston", flush=True)
-        subprocess.run(["/etc/init.d/S49weston", "start"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        else:
+            print("[rkdesk] starting weston", flush=True)
+            subprocess.run(["/etc/init.d/S49weston", "start"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
         self._wait_for_socket(8.0)
 
     @staticmethod

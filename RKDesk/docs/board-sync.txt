@@ -11,9 +11,11 @@ OK   /opt/rkdesk/rkdesk/mirror.py
 OK   /opt/rkdesk/rkdesk/input.py
 OK   /opt/rkdesk/rkdesk_server.py
 OK   /opt/rkdesk/web/index.html
+OK   /opt/rkdesk/rkdesk/av.py
 OK   /opt/rkdesk/web/styles.css
 OK   /opt/rkdesk/rkdesk/terminal.py
+OK   /opt/rkdesk/web/av.js
 OK   /opt/rkdesk/rkdesk_input.py
 OK   /opt/rkdesk/rkdesk/drm.py
 OK   /etc/init.d/S48rkdesk-input
-[verify] 17/17 match
+[verify] 19/19 match
