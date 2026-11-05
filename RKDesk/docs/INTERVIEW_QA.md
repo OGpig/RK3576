@@ -11,7 +11,7 @@ RKDesk 解决的是“Buildroot 精简系统没有 VNC，如何远程看真实�
 视频从 DRM/KMS 的 CRTC framebuffer 经 dma-buf 读取，JPEG over WebSocket 到浏览器；
 输入用 uinput 绝对鼠标/键盘注入 Weston；音频用 PulseAudio monitor 下行、null sink +
 remap source 做虚拟麦克风上行。Python 版功能完整，C 版做性能对比：
-同 CPU 下 30fps vs 15fps，内存 7.8MB vs 52MB。
+C MPP 27.6fps/CPU 9.9%，Python 15fps/64.8%；RSS 18MB vs 52MB。
 
 ---
 
@@ -121,7 +121,7 @@ dy = 800 - 0.625*lx
 
 第一版逐像素旋转，`encode_ms=44ms`，只有 23fps。旋转是跨步访问：读源列、写目标行，
 1M 像素缓存不友好。改成 C 编码原生帧，浏览器 Canvas 用 GPU 旋转，`encode_ms` 降到
-约 20ms，30fps。
+约 20ms；改用 RGA+MPP 后约 7.4ms，27.6fps。
 
 **追问**：Canvas 旋转真的用 GPU 吗？
 Chromium 的 2D canvas 在 GPU 合成路径下会加速；即使软件路径，一次 1M 像素旋转也比
@@ -250,21 +250,23 @@ Int16，WebSocket 二进制发送；工作线程不阻塞 UI。
 ### Q27：Windows 上没有交叉编译器怎么办？
 
 Bootlin aarch64 工具链是 Linux ELF，Git Bash 不能执行；最后用 **Zig Windows**
-`zig cc -target aarch64-linux-gnu`，链接板端 `libturbojpeg.so.0`，手写最小 TurboJPEG
-ABI 声明，不需要 dev 头文件。
+`zig cc -target aarch64-linux-gnu`，链接板端 `libturbojpeg/librga/GStreamer/OpenSSL`，
+手写最小 ABI 声明，不需要 dev 头文件。
 
-### Q28：C 版为什么能到 30fps？
+### Q28：C 版为什么能到 27.6fps，CPU 只有 9.9%？
 
-- 直接 mmap + TurboJPEG，无 Python 对象/解释器；
+- 直接 DRM mmap，无 Python 对象/解释器；
+- **RGA** 把 BGRX 转 NV12（约 5ms），**MPP** 硬件 JPEG（约 7.4ms/帧）；
 - 不在 C 里旋转，浏览器 GPU 旋转；
-- 每连接独立线程 + 发送超时，采集不被慢客户端拖死；
+- 静止时 256B 采样哈希 + 帧间隔休眠；输入事件直接 force 出帧；
+- 每客户端最新帧邮箱，慢客户端不阻塞采集；
 - 无客户端暂停编码。
 
 ### Q29：C 版线程模型？有竞态吗？
 
-main accept，每个连接一个线程；capture 线程广播。client list 用互斥锁；
-发送在 clients 锁内完成，避免 client 被 free 后 capture 还在用；
-发送设置 `SO_SNDTIMEO`，慢客户端不会永久阻塞。
+main accept，每个连接一个线程；capture 线程编码；每个客户端一个 sender 线程 +
+最新帧邮箱。采集用 `trylock` 写 pending，拿不到锁就丢帧；sender 独立 SSL_write。
+client list 用互斥锁；删除客户端时先摘链、置 closing、join sender，再释放 SSL/fd。
 
 ### Q30：C 版点击为什么一开始无效？
 
@@ -272,15 +274,16 @@ C 页面发的是 Python `/ws` 的 `down/up`，但输入守护只认 `move/butto
 修复为 `move + button`，并在按下/抬起之间加 25/60ms，避免 Weston 还没应用 move
 就收到 button。
 
-### Q31：为什么 C 的 encode_ms 比 Python 高，但 fps 更高？
+### Q31：为什么 C MPP 的 encode 比 Python 低，但画质略软？
 
-`encode_ms` 只统计 JPEG；Python 还有抓帧拷贝/旋转/对象开销，C 没有。
-C 用 4:2:2、TurboJPEG；Python 用 Pillow。整体吞吐看 fps/CPU，而不是单看 encode。
+MPP 是硬件 JPEG，q85/4:2:0，`encode_ms` 约 7.4ms；Python 是 Pillow q78/4:2:2，
+文字更锐但 CPU 64.8%。C 还有 Turbo fallback（19.6ms/4:2:2），可按画质/CPU 取舍。
 
-### Q32：C 空闲为什么 0% CPU？
+### Q32：C 静止为什么只有 7.2% CPU？
 
-capture loop 先检查 client list，没有客户端就 `usleep(100ms)` 跳过编码；
-页面打开后 WS 连接才启动。
+没有输入时用 256B 采样哈希 + `1000/fps` 休眠；有输入事件时 force 跳过哈希。
+无客户端时约 0–1%。早期版本静止分支 `usleep(1000)`，每秒跑几百次哈希，CPU 61%，
+这是“忙等 + 重复哈希”的典型反例。
 
 ---
 
@@ -341,7 +344,7 @@ libinput 分类、uinput ABI、socket 状态、旋转公式任一层。方法是
 4. 旋转：800×1280 → rotate-90 → 1280×800 → 逆变换；
 5. 音频：sink → monitor → parec → WS → AudioContext；麦克风反向 null sink/remap；
 6. C：capture thread + client threads + TurboJPEG；
-7. 数字：15fps/52MB vs 30fps/7.8MB；音频 150–250ms。
+7. 数字：Python 15fps/52MB/CPU64.8%；C 27.6fps/18MB/CPU9.9%；音频 150–250ms。
 
 ---
 

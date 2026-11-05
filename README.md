@@ -16,7 +16,7 @@ http://192.168.31.153:8088
 
 - 画面/鼠标键盘：`http://192.168.31.153:8088`
 - **双向音频（麦克风）**：`https://192.168.31.153:8443`（自签名证书，首次需手动信任）
-- **C 版性能对比**：`http://192.168.31.153:8089`（画面/输入）+ `https://192.168.31.153:8444`（音频/麦克风）
+- **C 版主方案候选**：`http://192.168.31.153:8089`（画面/输入）+ `https://192.168.31.153:8444`（音频/麦克风）
 
 ```bash
 # 重新部署（改代码后）
@@ -35,7 +35,7 @@ ssh rk3576
 | --- | --- | --- |
 | **RKDesk mirror** | ✅ 当前主力 | DRM 真实画面 + 绝对鼠标/键盘，端口 **8088** |
 | RKDesk virtual | 🧪 兜底 | `--mode virtual`，板端自绘桌面 + PTY，无 Weston 时可用 |
-| RKDesk C 8089/8444 | 🧪 对比 | C + DRM + TurboJPEG + Pulse 音频，30fps/7.8MB，见 `RKDesk/c-src/` |
+| RKDesk C 8089/8444 | 🚀 主方案候选 | C + DRM + RGA + MPP 硬件 JPEG + Pulse，27.6fps/CPU 9.9%，见 `RKDesk/c-src/` |
 
 旧 `Visualisation/`（Node/noVNC + `board_agent.py` 旧 MVP）已删除，历史仍保留在 Git 中。
 
@@ -57,7 +57,7 @@ Audio      : PulseAudio 16.1（ES8388 sink monitor + RKDesk 虚拟麦克风）
 
 - [RKDesk 设计、抓屏/输入原理、性能与限制](RKDesk/README.md)
 - [系统说明：架构、链路、决策、性能](RKDesk/docs/ARCHITECTURE.md)
-- [实现步骤：分阶段、逐模块、15 个故障复盘](RKDesk/docs/IMPLEMENTATION.md)
+- [实现步骤：分阶段、逐模块、18 个故障复盘](RKDesk/docs/IMPLEMENTATION.md)
 - [答辩/面试问答：40 个技术细节](RKDesk/docs/INTERVIEW_QA.md)
 - [mlsysbook IDE Setup 实验（RK3576 版）](RKDesk/docs/mlsys-ide-setup.md)
 - [板端环境校验报告](RKDesk/docs/env-report.txt)

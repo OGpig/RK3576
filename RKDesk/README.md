@@ -9,7 +9,7 @@
 ## 完整文档
 
 - [系统说明：架构、链路、决策、性能](docs/ARCHITECTURE.md)
-- [实现步骤：分阶段、逐模块、15 个故障复盘](docs/IMPLEMENTATION.md)
+- [实现步骤：分阶段、逐模块、18 个故障复盘](docs/IMPLEMENTATION.md)
 - [答辩/面试问答：40 个技术细节](docs/INTERVIEW_QA.md)
 - [文档中心与阅读路径](docs/README.md)
 
@@ -37,7 +37,7 @@ HDMI 未接，接上后会自动切到 1920×1080 并自适应。
 ```text
 http://192.168.31.153:8088          # 画面 + 鼠标键盘
 https://192.168.31.153:8443         # 画面 + 鼠标键盘 + 双向音频（自签名证书）
-http://192.168.31.153:8089         # C 版画面/输入（性能对比）
+http://192.168.31.153:8089         # C 版画面/输入（主方案候选）
 https://192.168.31.153:8444        # C 版音频/麦克风（自签名证书）
 ```
 
@@ -152,37 +152,40 @@ tail -f /var/log/rkdesk.log
 - 延迟约 150–250 ms（Pulse + WebSocket + 80 ms 播放缓冲）。
 - 摄像头视频尚未接入；当前硬件没有 sensor，接 USB 摄像头后可扩展 MJPEG 预览。
 
-## C 版镜像（8089，性能对比）
+## C 版镜像（8089/8444，主方案候选）
 
-`c-src/` 是一份独立的板端 C 实现：直接 DRM ioctl 取 scanout，`libjpeg-turbo` 编码，
-8089 端口提供页面/WebSocket/健康接口，输入复用现有 `rkdesk_input.py`。
-它包含与 Python 版等价的 PulseAudio 双工音频和 HTTPS 8444；
-用于和 Python 版对比画面吞吐/资源占用。
+`c-src/` 是独立的板端 C 实现：直接 DRM ioctl 取 scanout，**RGA 转 NV12 + MPP 硬件 JPEG**
+（TurboJPEG 兜底），8089 提供页面/WebSocket，8444 提供 HTTPS，音频走 PulseAudio；
+输入复用现有 `rkdesk_input.py`。它已具备作为日常镜像主方案的能力，Python 版保留作
+HDMI 热插拔/虚拟桌面 fallback。
 
 ```bash
 cd RKDesk/c-src
-bash build.sh                  # Zig aarch64 + 板端 libturbojpeg
+bash build.sh                  # Zig aarch64 + libturbojpeg/librga/GStreamer/OpenSSL
 # deploy.sh 会把已编译的 rkdesk_c 复制到 /opt/rkdesk/
 ssh root@192.168.31.153 '
   pkill -x rkdesk_c 2>/dev/null || true
-  nohup /opt/rkdesk/rkdesk_c --port 8089 --fps 30 --quality 78 --subsamp 422 \
+  nohup /opt/rkdesk/rkdesk_c --port 8089 --https-port 8444 \
+      --fps 30 --quality 85 \
+      --cert /opt/rkdesk/certs/rkdesk.crt \
+      --key  /opt/rkdesk/certs/rkdesk.key \
       >/var/log/rkdesk-c.log 2>&1 &
 '
 ```
 
-实测（q78 / 4:2:2 / 6 秒拖动）：
+实测（6 秒拖动；C MPP q85/4:2:0，Turbo q78/4:2:2）：
 
-| 指标 | Python 8088 | C 8089 |
-| --- | --- | --- |
-| 帧率 | 15.0 fps | **29.8 fps** |
-| 带宽 | 807 kbps | 1660 kbps |
-| 平均帧 | 53.8 KB | 55.7 KB |
-| encode | 15.9 ms | 20.7 ms |
-| CPU | 64.8% | 64.3% |
-| RSS | 52 MB | **7.8 MB** |
+| 指标 | Python 8088 | C Turbo | **C MPP+RGA** |
+| --- | --- | --- | --- |
+| 帧率 | 15.0 fps | 26.8 fps | **27.6 fps** |
+| 带宽 | 807 kbps | 1282 kbps | **1234 kbps** |
+| 平均帧 | 53.8 KB | 47.8 KB | 44.7 KB |
+| encode | 15.9 ms | 19.6 ms | **7.4 ms** |
+| CPU | 64.8% | 35.8% | **9.9%** |
+| RSS | 52 MB | 9.4 MB | 18.1 MB |
 
-C 版在相近 CPU 下帧率翻倍、内存约 1/7；细节和构建说明见
-[`c-src/README.md`](c-src/README.md)。
+C MPP 的 CPU 约 **9.9%**、帧率 27.6fps、带宽 1.23Mbps；Turbo fallback 为 26.8fps/35.8%，
+RSS 更低（9.4MB）。细节和构建说明见 [`c-src/README.md`](c-src/README.md)。
 
 ## 性能（实测）
 

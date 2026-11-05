@@ -65,11 +65,11 @@ flowchart LR
 | 指标 | Python 版（8088） | C 版（8089） |
 | --- | --- | --- |
 | 分辨率 | 1280×800 逻辑（原生 800×1280 rotate-90） | 同左 |
-| 帧率 | 15.0 fps | 29.8 fps |
-| 带宽 | 约 807 kbps（q78） | 约 1660 kbps（q78/4:2:2） |
-| 服务端 encode | 15.9 ms | 20.7 ms |
-| 进程 CPU | 64.8% | 64.3% |
-| 进程 RSS | 52 MB | 7.8 MB |
+| 帧率 | 15.0 fps | **27.6 fps** |
+| 带宽 | 约 807 kbps（q78/4:2:2） | 约 1234 kbps（MPP q85/4:2:0） |
+| 服务端 encode | 15.9 ms | **7.4 ms** |
+| 进程 CPU | 64.8% | **9.9%** |
+| 进程 RSS | 52 MB | 18.1 MB（含 GStreamer） |
 | 音频 | 48 kHz PCM 双工 + 虚拟麦克风 | 无（仅画面/输入） |
 
 ---
@@ -577,7 +577,7 @@ lib.wet_main(len(argv), array, None)
 
 ---
 
-## C 版镜像：性能对比通道
+## C 版镜像：主方案候选
 
 ![C 版 8089 页面](c-browser.png)
 
@@ -594,17 +594,22 @@ C 版同样提供 `/av`：
 flowchart TB
     M["main<br/>bind 8089 / accept"] --> T1["conn thread 1"]
     M --> T2["conn thread 2"]
-    C["capture thread"] -->|mutex| CL["client list"]
     T1 -->|text| IN["input Unix socket"]
     T2 -->|text| IN
-    C -->|JPEG| T1
-    C -->|JPEG| T2
+    C["capture thread"] -->|"trylock / drop"| MB["per-client mailbox"]
+    MB --> S1["sender thread 1"] --> T1
+    MB --> S2["sender thread 2"] --> T2
 ```
 
-- `capture thread`：DRM mmap → TurboJPEG → 广播；
-- 每个连接一个线程：HTTP 静态页 / `/healthz` / `/api/screenshot.jpg` / `/ws`；
-- client list 用互斥锁；发送设置 `SO_SNDTIMEO`，避免慢客户端拖死采集；
-- 无客户端时 `usleep(100ms)` 暂停编码（空闲 0% CPU）。
+- `capture thread`：DRM mmap → RGA BGRX→NV12 → MPP JPEG（TurboJPEG 兜底）；
+- 每帧重查 CRTC：Weston page flip 会换 fb_id，必须重新 GETFB/PRIME/mmap；
+- 每连接一个 sender 线程 + **最新帧邮箱**：采集只写 pending，慢客户端丢旧帧，不阻塞采集；
+- 有输入事件时 `g_force_frame` 跳过 4MB 哈希；静止时 256B 采样哈希 + 帧间隔休眠；
+- 无客户端时 `usleep(100ms)` 暂停编码（空闲约 0–1% CPU）。
+
+结论：C 已具备主方案能力（视频/输入/音频/HTTPS、硬件 JPEG、静态省流、慢客户端隔离）。
+当前仍保留 8089/8444 作为并行入口，未把 Python 的 8088/8443 切给 C；正式切换还需补
+HDMI 热插拔、虚拟桌面 fallback 和 UI 细节。
 
 ### C 抓帧
 
@@ -616,7 +621,8 @@ flowchart LR
     D --> E["ioctl GETFB"]
     E --> F["PRIME_HANDLE_TO_FD"]
     F --> G["mmap BGRX"]
-    G --> H["TurboJPEG tjCompress2"]
+    G --> R["RGA BGRX→NV12"]
+    R --> H["MPP mppjpegenc<br/>TurboJPEG fallback"]
     H --> I["WS binary"]
 ```
 
@@ -639,8 +645,10 @@ C 页面发的是输入守护进程的原生协议：
 
 - 主机无 gcc/交叉工具链；Bootlin Linux ELF 在 Windows 不能执行；
 - 使用 **Zig Windows 0.13**：`zig cc -target aarch64-linux-gnu`；
-- 链接板端 `libturbojpeg.so.0`（手写最小 TurboJPEG ABI 声明，不需要 dev 头文件）；
-- 产物约 119 KB，动态链接 glibc + libturbojpeg + libssl/libcrypto。
+- 链接板端 `libturbojpeg.so.0`、`librga.so.2`、`libgstreamer/libgstapp/libgobject/libglib`
+  和 `libssl/libcrypto`；手写最小 ABI 声明，不需要 dev 头文件；
+- RGA 头文件来自 `airockchip/librga`（Apache-2.0），放在 `c-src/rga_include/`；
+- 产物约 136 KB，动态链接 glibc + 上述运行库。
 
 ---
 
@@ -651,26 +659,26 @@ C 页面发的是输入守护进程的原生协议：
 - `ws_bench.js`：WebSocket 连接 6 秒，持续发送鼠标移动，统计帧数/字节数；
 - `/healthz`：服务端 `fps`、`encode_ms`；
 - `ps`：CPU/RSS；
-- 质量统一 q78；C 使用 4:2:2，Python 使用 4:2:2（Pillow subsampling=1）。
+- Python q78/4:2:2；C Turbo q78/4:2:2；C MPP q85/4:2:0（硬件 JPEG 建议 q85–90）。
 
 ### 数据
 
-| 指标 | Python 8088 | C 8089 |
-| --- | --- | --- |
-| fps | 15.0 | **29.8** |
-| kbps | 807 | 1660 |
-| 平均帧 | 53.8 KB | 55.7 KB |
-| encode | 15.9 ms | 20.7 ms |
-| CPU | 64.8% | 64.3% |
-| RSS | 52 MB | **7.8 MB** |
+| 指标 | Python 8088 | C Turbo | **C MPP+RGA** |
+| --- | --- | --- | --- |
+| 帧率 | 15.0 fps | 26.8 fps | **27.6 fps** |
+| 带宽 | 807 kbps | 1282 kbps | **1234 kbps** |
+| 平均帧 | 53.8 KB | 47.8 KB | 44.7 KB |
+| encode | 15.9 ms | 19.6 ms | **7.4 ms** |
+| CPU | 64.8% | 35.8% | **9.9%** |
+| RSS | 52 MB | 9.4 MB | 18.1 MB |
 
 ### 解释
 
 - Python 每帧有解释器调度、Pillow 对象、抓帧拷贝/旋转等开销；
-- C 直接 mmap + TurboJPEG，省掉旋转（浏览器 GPU 做），因此同 CPU 下帧率翻倍；
-- C `encode_ms` 略高是测量口径与 4:2:2/实现差异，整体吞吐以 fps/CPU 为准；
-- C 带宽翻倍是因为帧率翻倍，单帧大小接近；
-- C 无客户端暂停，空闲 CPU 0%，避免常驻浪费。
+- C MPP 先用 RGA 把 BGRX 转 NV12，再交给 `/dev/mpp_service` 硬件 JPEG；
+- C 有输入时跳过 4MB 哈希，静止时 256B 采样 + 帧间隔休眠；无客户端暂停；
+- C 的瓶颈从 CPU 编码转为内存/总线/浏览器解码；27.6fps 时 CPU 约 9.9%；
+- C Turbo fallback 仍有 26.8fps，但 CPU 35.8%、RSS 9.4MB；MPP 以 RSS 换 CPU/带宽。
 
 ---
 

@@ -16,6 +16,8 @@
  *   zig cc -target aarch64-linux-gnu -O3 -pthread \
  *       -L ../toolchains/board-libs \
  *       -l:libturbojpeg.so.0 -l:libssl.so.3 -l:libcrypto.so.3 \
+ *       -l:librga.so.2 -l:libgstreamer-1.0.so.0 -l:libgstapp-1.0.so.0 \
+ *       -l:libgobject-2.0.so.0 -l:libglib-2.0.so.0 \
  *       rkdesk_c.c -o rkdesk_c
  */
 #define _GNU_SOURCE
@@ -25,6 +27,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -44,6 +47,34 @@
 
 #include <drm/drm.h>
 #include <drm/drm_mode.h>
+#include "rga_include/rga.h"
+#include "rga_include/im2d_type.h"
+#include "rga_include/im2d_buffer.h"
+
+/* --- minimal GStreamer/App ABI (appsrc -> mppjpegenc -> appsink) --------- */
+typedef struct _GstElement GstElement;
+typedef struct _GstBuffer GstBuffer;
+typedef struct _GstSample GstSample;
+typedef struct _GstMapInfo {
+    void *memory;
+    int flags;
+    unsigned char *data;
+    size_t size;
+    size_t maxsize;
+    void *user_data[4];
+} GstMapInfo;
+extern void gst_init(int *argc, char ***argv);
+extern GstElement *gst_parse_launch(const char *pipeline, void **error);
+extern GstElement *gst_bin_get_by_name(GstElement *bin, const char *name);
+extern int gst_element_set_state(GstElement *element, int state);
+extern GstBuffer *gst_buffer_new_allocate(void *allocator, size_t size, void *params);
+extern int gst_buffer_map(GstBuffer *buffer, GstMapInfo *info, int flags);
+extern void gst_buffer_unmap(GstBuffer *buffer, GstMapInfo *info);
+extern void gst_buffer_unref(GstBuffer *buffer);
+extern int gst_app_src_push_buffer(void *appsrc, GstBuffer *buffer);
+extern GstSample *gst_app_sink_pull_sample(void *appsink);
+extern GstBuffer *gst_sample_get_buffer(GstSample *sample);
+extern void gst_sample_unref(GstSample *sample);
 
 /* --- minimal OpenSSL ABI (libssl.so.3 / libcrypto.so.3 on the board) ----- */
 typedef struct ssl_ctx_st SSL_CTX;
@@ -89,10 +120,21 @@ static int g_fps_target = 30;
 static int g_quality = 80;
 static int g_subsamp = TJSAMP_420;
 static const char *g_device = "/dev/dri/card0";
+static int g_use_mpp = 0;
+static GstElement *g_mpp_pipeline = NULL;
+static GstElement *g_mpp_src = NULL;
+static GstElement *g_mpp_sink = NULL;
+static unsigned char *g_nv12 = NULL;
+extern int imcvtcolor_t(rga_buffer_t src, rga_buffer_t dst, int sfmt, int dfmt, int mode, int sync);
 
 static int g_drm_fd = -1;
 static uint32_t g_crtc_id = 0;
 static int g_raw_w = 0, g_raw_h = 0, g_pitch = 0;
+static uint32_t g_fb_id = 0;
+static int g_prime_fd = -1;
+static unsigned long g_fb_changes = 0;
+static unsigned long g_frames_total = 0;
+static double g_drm_ms = 0, g_hash_ms = 0, g_loop_ms = 0;
 static int g_disp_w = 0, g_disp_h = 0;
 static int g_rotation = 0;
 static void *g_map = NULL;
@@ -102,6 +144,9 @@ static unsigned char *g_latest = NULL;
 static size_t g_latest_size = 0;
 static double g_encode_ms = 0;
 static double g_fps = 0;
+static uint64_t g_frame_hash = 0;
+static int g_frame_hash_valid = 0;
+static volatile int g_force_frame = 0;
 
 /* --- clients ------------------------------------------------------------- */
 typedef struct Client {
@@ -109,11 +154,19 @@ typedef struct Client {
     SSL *ssl;
     int audio;
     pthread_mutex_t lock;
+    pthread_cond_t cond;
+    pthread_t sender;
+    unsigned char *pending;
+    size_t pending_len;
+    int pending_ready;
+    int closing;
+    unsigned long dropped;
     struct Client *next;
 } Client;
 
 static Client *g_clients = NULL;
 static pthread_mutex_t g_clients_lock = PTHREAD_MUTEX_INITIALIZER;
+static int ws_send_binary(Client *c, const unsigned char *data, size_t len);
 
 /* --- input relay --------------------------------------------------------- */
 static int g_input_fd = -1;
@@ -257,8 +310,9 @@ static int drm_init(void) {
 
     g_map_size = (size_t)fb.pitch * fb.height;
     g_map = mmap(NULL, g_map_size, PROT_READ, MAP_SHARED, prime.fd, 0);
-    close(prime.fd);
+    g_prime_fd = prime.fd;
     if (g_map == MAP_FAILED) { perror("mmap"); return -1; }
+    g_fb_id = crtc.fb_id;
 
     g_raw_w = fb.width;
     g_raw_h = fb.height;
@@ -274,6 +328,39 @@ static int drm_init(void) {
     }
     printf("drm %dx%d pitch=%d display=%dx%d rot=%d\n",
            g_raw_w, g_raw_h, g_pitch, g_disp_w, g_disp_h, g_rotation);
+    return 0;
+}
+
+static int drm_refresh(void) {
+    struct drm_mode_crtc crtc;
+    memset(&crtc, 0, sizeof(crtc));
+    crtc.crtc_id = g_crtc_id;
+    if (ioctl(g_drm_fd, DRM_IOCTL_MODE_GETCRTC, &crtc) < 0) return -1;
+    if (!crtc.fb_id || crtc.fb_id == g_fb_id) return 0;
+
+    struct drm_mode_fb_cmd fb;
+    memset(&fb, 0, sizeof(fb));
+    fb.fb_id = crtc.fb_id;
+    if (ioctl(g_drm_fd, DRM_IOCTL_MODE_GETFB, &fb) < 0) return -1;
+    if (fb.width != g_raw_w || fb.height != g_raw_h || fb.pitch != g_pitch) {
+        /* The board normally stays 800x1280; keep the first geometry. */
+        return 0;
+    }
+
+    struct drm_prime_handle prime;
+    memset(&prime, 0, sizeof(prime));
+    prime.handle = fb.handle;
+    prime.flags = DRM_CLOEXEC | DRM_RDWR;
+    if (ioctl(g_drm_fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime) < 0) return -1;
+
+    void *map = mmap(NULL, g_map_size, PROT_READ, MAP_SHARED, prime.fd, 0);
+    if (map == MAP_FAILED) { close(prime.fd); return -1; }
+    if (g_map) munmap(g_map, g_map_size);
+    if (g_prime_fd >= 0) close(g_prime_fd);
+    g_map = map;
+    g_prime_fd = prime.fd;
+    g_fb_id = crtc.fb_id;
+    g_fb_changes++;
     return 0;
 }
 
@@ -293,6 +380,7 @@ static int input_connect(void) {
 }
 
 static void input_forward(const char *data, size_t len) {
+    __sync_lock_test_and_set(&g_force_frame, 1);
     pthread_mutex_lock(&g_input_lock);
     if (g_input_fd < 0) g_input_fd = input_connect();
     if (g_input_fd >= 0) {
@@ -308,11 +396,54 @@ static void input_forward(const char *data, size_t len) {
 }
 
 /* --- client queue -------------------------------------------------------- */
+static void *client_sender(void *arg) {
+    Client *c = (Client *)arg;
+    for (;;) {
+        pthread_mutex_lock(&c->lock);
+        while (!c->pending_ready && !c->closing) {
+            pthread_cond_wait(&c->cond, &c->lock);
+        }
+        if (c->closing && !c->pending_ready) {
+            pthread_mutex_unlock(&c->lock);
+            break;
+        }
+        unsigned char *data = c->pending;
+        size_t len = c->pending_len;
+        c->pending = NULL;
+        c->pending_len = 0;
+        c->pending_ready = 0;
+        pthread_mutex_unlock(&c->lock);
+        if (data) {
+            ws_send_binary(c, data, len);
+            free(data);
+        }
+    }
+    return NULL;
+}
+
+static void client_send_latest(Client *c, const unsigned char *data, size_t len) {
+    if (!c || c->audio) return;
+    if (pthread_mutex_trylock(&c->lock) != 0) {
+        __sync_fetch_and_add(&c->dropped, 1);
+        return;
+    }
+    free(c->pending);
+    c->pending = malloc(len);
+    if (c->pending) {
+        memcpy(c->pending, data, len);
+        c->pending_len = len;
+        c->pending_ready = 1;
+        pthread_cond_signal(&c->cond);
+    }
+    pthread_mutex_unlock(&c->lock);
+}
+
 static void client_add(Client *c) {
     pthread_mutex_lock(&g_clients_lock);
     c->next = g_clients;
     g_clients = c;
     pthread_mutex_unlock(&g_clients_lock);
+    __sync_lock_test_and_set(&g_force_frame, 1);
 }
 
 static void client_remove(Client *c) {
@@ -321,7 +452,16 @@ static void client_remove(Client *c) {
     while (*p && *p != c) p = &(*p)->next;
     if (*p) *p = c->next;
     pthread_mutex_unlock(&g_clients_lock);
+    if (c->sender) {
+        pthread_mutex_lock(&c->lock);
+        c->closing = 1;
+        pthread_cond_signal(&c->cond);
+        pthread_mutex_unlock(&c->lock);
+        pthread_join(c->sender, NULL);
+    }
     pthread_mutex_lock(&c->lock);
+    free(c->pending);
+    c->pending = NULL;
     if (c->ssl) {
         SSL_shutdown(c->ssl);
         SSL_free(c->ssl);
@@ -330,6 +470,7 @@ static void client_remove(Client *c) {
     if (c->fd >= 0) close(c->fd);
     c->fd = -1;
     pthread_mutex_unlock(&c->lock);
+    pthread_cond_destroy(&c->cond);
     pthread_mutex_destroy(&c->lock);
     free(c);
 }
@@ -826,13 +967,108 @@ static void audio_shutdown(void) {
     audio_mic_stop();
 }
 
+static uint64_t frame_hash(void) {
+    const unsigned char *p = (const unsigned char *)g_map;
+    size_t total = (size_t)g_pitch * g_raw_h;
+    uint64_t h = 1469598103934665603ULL;
+    size_t i = 0;
+    /* Sample every 256 bytes: a full FNV over 4 MB at 30 fps costs ~50% CPU.
+       Input events set g_force_frame, so cursor-only changes are never missed;
+       sampled lines still catch video/large UI animation. */
+    for (; i + 8 <= total; i += 256) {
+        uint64_t v;
+        memcpy(&v, p + i, sizeof(v));
+        h = (h ^ v) * 1099511628211ULL;
+    }
+    for (; i < total; i++) {
+        h = (h ^ p[i]) * 1099511628211ULL;
+    }
+    return h;
+}
+
 /* --- capture thread ------------------------------------------------------ */
 static tjhandle g_tj = NULL;
+
+static int mpp_init(int quality) {
+    gst_init(NULL, NULL);
+    char pipeline[512];
+    snprintf(pipeline, sizeof(pipeline),
+             "appsrc name=src is-live=true do-timestamp=true ! "
+             "video/x-raw,format=NV12,width=%d,height=%d,framerate=%d/1 ! "
+             "mppjpegenc q-factor=%d ! appsink name=sink sync=false max-buffers=2 drop=true",
+             g_raw_w, g_raw_h, g_fps_target > 0 ? g_fps_target : 30,
+             quality < 1 ? 1 : (quality > 99 ? 99 : quality));
+    g_mpp_pipeline = gst_parse_launch(pipeline, NULL);
+    if (!g_mpp_pipeline) return -1;
+    g_mpp_src = gst_bin_get_by_name(g_mpp_pipeline, "src");
+    g_mpp_sink = gst_bin_get_by_name(g_mpp_pipeline, "sink");
+    if (!g_mpp_src || !g_mpp_sink) return -1;
+    int state = gst_element_set_state(g_mpp_pipeline, 4 /* PLAYING */);
+    if (state < 0) return -1;
+    g_use_mpp = 1;
+    printf("encoder: mppjpegenc q=%d (%dx%d)\n", quality, g_raw_w, g_raw_h);
+    return 0;
+}
+
+static int rga_convert_nv12(const unsigned char *src, int width, int height, int pitch,
+                            unsigned char *dst) {
+    if (!g_nv12 || pitch % 4) return -1;
+    rga_buffer_t s = wrapbuffer_virtualaddr_t((void *)src, width, height,
+                                              pitch / 4, height, RK_FORMAT_BGRA_8888);
+    rga_buffer_t d = wrapbuffer_virtualaddr_t(dst, width, height,
+                                              width, height, RK_FORMAT_YCbCr_420_SP);
+    int status = imcvtcolor_t(s, d, RK_FORMAT_BGRA_8888, RK_FORMAT_YCbCr_420_SP, 0, 1);
+    return status == IM_STATUS_SUCCESS ? 0 : -1;
+}
+
+static int mpp_encode(const unsigned char *src, int width, int height,
+                      unsigned char **jpeg, unsigned long *jpeg_size) {
+    size_t packed = (size_t)width * height * 3 / 2;
+    GstBuffer *buffer = gst_buffer_new_allocate(NULL, packed, NULL);
+    if (!buffer) return -1;
+    GstMapInfo map;
+    if (!gst_buffer_map(buffer, &map, 2 /* WRITE */)) {
+        gst_buffer_unref(buffer);
+        return -1;
+    }
+    memcpy(map.data, src, packed);
+    gst_buffer_unmap(buffer, &map);
+    if (gst_app_src_push_buffer(g_mpp_src, buffer) < 0) return -1;
+
+    GstSample *sample = gst_app_sink_pull_sample(g_mpp_sink);
+    if (!sample) return -1;
+    GstBuffer *out = gst_sample_get_buffer(sample);
+    GstMapInfo omap;
+    if (!out || !gst_buffer_map(out, &omap, 1 /* READ */)) {
+        gst_sample_unref(sample);
+        return -1;
+    }
+    *jpeg = malloc(omap.size);
+    if (!*jpeg) {
+        gst_buffer_unmap(out, &omap);
+        gst_sample_unref(sample);
+        return -1;
+    }
+    memcpy(*jpeg, omap.data, omap.size);
+    *jpeg_size = (unsigned long)omap.size;
+    gst_buffer_unmap(out, &omap);
+    gst_sample_unref(sample);
+    return 0;
+}
 
 static int encode_frame(unsigned char **jpeg, unsigned long *size) {
     /* Encode native scanout; the browser canvas rotates it on the GPU. */
     *jpeg = NULL;
     *size = 0;
+    if (g_use_mpp) {
+        if (rga_convert_nv12((const unsigned char *)g_map, g_raw_w, g_raw_h,
+                             g_pitch, g_nv12) == 0 &&
+            mpp_encode(g_nv12, g_raw_w, g_raw_h, jpeg, size) == 0) {
+            return 0;
+        }
+        fprintf(stderr, "RGA/MPP failed, falling back to TurboJPEG\n");
+        g_use_mpp = 0;
+    }
     int rc = tjCompress2(g_tj, (const unsigned char *)g_map, g_raw_w, g_pitch,
                          g_raw_h, TJPF_BGRX, jpeg, size, g_subsamp,
                          g_quality, TJFLAG_FASTDCT);
@@ -849,6 +1085,7 @@ static void *capture_loop(void *arg) {
     if (!g_tj) { fprintf(stderr, "tjInitCompress: %s\n", tjGetErrorStr()); return NULL; }
     double frames = 0, last = now_ms(), fps_at = last;
     while (g_running) {
+        double loop_start = now_ms();
         pthread_mutex_lock(&g_clients_lock);
         int has_clients = g_clients != NULL;
         pthread_mutex_unlock(&g_clients_lock);
@@ -857,6 +1094,36 @@ static void *capture_loop(void *arg) {
             usleep(100000);
             continue;
         }
+
+        double drm_start = now_ms();
+        if (drm_refresh() != 0) {
+            usleep(10000);
+            continue;
+        }
+        g_drm_ms = now_ms() - drm_start;
+        int force = __sync_lock_test_and_set(&g_force_frame, 0);
+        if (!force) {
+            double hash_start = now_ms();
+            uint64_t hash = frame_hash();
+            g_hash_ms = now_ms() - hash_start;
+            if (g_frame_hash_valid && hash == g_frame_hash) {
+                double now = now_ms();
+                if (now - fps_at >= 1000.0) {
+                    g_fps = 0;
+                    frames = 0;
+                    fps_at = now;
+                }
+                int delay = 1000000 / (g_fps_target > 0 ? g_fps_target : 30);
+                usleep(delay);
+                continue;
+            }
+            g_frame_hash = hash;
+            g_frame_hash_valid = 1;
+        } else {
+            /* Input-driven frames skip the 4 MB hash entirely. */
+            g_frame_hash_valid = 0;
+        }
+
         double t0 = now_ms();
         unsigned char *jpeg = NULL;
         unsigned long size = 0;
@@ -870,12 +1137,14 @@ static void *capture_loop(void *arg) {
 
             pthread_mutex_lock(&g_clients_lock);
             for (Client *c = g_clients; c; c = c->next) {
-                if (!c->audio) ws_send_binary(c, jpeg, size);
+                client_send_latest(c, jpeg, size);
             }
             pthread_mutex_unlock(&g_clients_lock);
             free(jpeg);
             frames++;
+            g_frames_total++;
         }
+        g_loop_ms = now_ms() - loop_start;
         double now = now_ms();
         if (now - fps_at >= 1000.0) {
             g_fps = frames * 1000.0 / (now - fps_at);
@@ -906,7 +1175,7 @@ static const char *PAGE =
 "main{height:calc(100% - 48px);display:grid;place-items:center;padding:14px}"
 "canvas{max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 20px 60px #000a;cursor:none;touch-action:none;background:#000}"
 "#k{position:fixed;left:-1000px;top:0;opacity:0}"
-"</style></head><body><header><b>RK3576 C mirror</b><span>DRM + TurboJPEG · port 8089</span>"
+"</style></head><body><header><b>RK3576 C mirror</b><span>DRM + MPP/TurboJPEG · 8089/8444</span>"
 "<div id=av><button id=spk class=ab>声音</button><select id=asrc></select><button id=mic class=ab>麦克风</button><button id=tone class=ab>测试音</button><span id=astat>音频检测中</span></div>"
 "<div id=hud><span id=stat>connecting</span><span id=info>--</span></div></header>"
 "<main><canvas id=c width=1280 height=800 tabindex=0></canvas></main><textarea id=k></textarea><script>"
@@ -927,7 +1196,7 @@ static const char *PAGE =
 "c.addEventListener('contextmenu',e=>e.preventDefault());"
 "k.addEventListener('keydown',e=>{let sp=['Enter','Backspace','Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','Delete','PageUp','PageDown','Insert','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'];if(sp.includes(e.key)||e.ctrlKey||e.altKey||e.metaKey){ws.send(JSON.stringify({t:'key',key:e.key,code:e.code,ctrl:e.ctrlKey,alt:e.altKey,shift:e.shiftKey,meta:e.metaKey}));e.preventDefault();}});"
 "k.addEventListener('input',()=>{if(k.value){ws.send(JSON.stringify({t:'text',text:k.value}));k.value='';}});"
-"setInterval(async()=>{try{let r=await fetch('/healthz').then(x=>x.json());rot=r.rotation;if(r.width!==W||r.height!==H){W=r.width;H=r.height;c.width=W;c.height=H;fit();}let now=performance.now();fps=frames*1000/(now-t0);frames=0;t0=now;info.textContent=r.fps.toFixed(1)+' fps · '+r.encode_ms.toFixed(1)+' ms enc · '+W+'x'+H;}catch(e){}},1000);"
+"setInterval(async()=>{try{let r=await fetch('/healthz').then(x=>x.json());rot=r.rotation;if(r.width!==W||r.height!==H){W=r.width;H=r.height;c.width=W;c.height=H;fit();}let now=performance.now();fps=frames*1000/(now-t0);frames=0;t0=now;info.textContent=r.fps.toFixed(1)+' fps · '+r.encode_ms.toFixed(1)+' ms · '+W+'x'+H+' · '+(r.encoder||'');}catch(e){}},1000);"
 "const spk=document.getElementById('spk'),micb=document.getElementById('mic'),toneb=document.getElementById('tone'),asrc=document.getElementById('asrc'),astat=document.getElementById('astat');"
 "let avws,actx,again,anext=0,aplaying=false,amic=false,astream=null,anode=null,ag=1;"
 "function avSend(o){if(avws&&avws.readyState===1)avws.send(JSON.stringify(o));}"
@@ -1043,7 +1312,11 @@ static void *conn_thread(void *arg) {
     SSL *ssl = NULL;
     Client *client = NULL;
     struct timeval tv = {1, 0};
+    int one = 1;
+    int sndbuf = 512 * 1024;
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
 
     if (tls) {
         if (!g_ssl_ctx) { close(fd); return NULL; }
@@ -1072,9 +1345,12 @@ static void *conn_thread(void *arg) {
         int n = snprintf(body, sizeof(body),
                          "{\"ok\":true,\"c\":true,\"width\":%d,\"height\":%d,\"rotation\":%d,"
                          "\"fps\":%.1f,\"encode_ms\":%.1f,\"audio\":%s,"
-                         "\"https_port\":%d}\n",
+                         "\"encoder\":\"%s\",\"fb_changes\":%lu,\"frames_total\":%lu,"
+                         "\"drm_ms\":%.1f,\"hash_ms\":%.1f,\"loop_ms\":%.1f,\"https_port\":%d}\n",
                          g_disp_w, g_disp_h, g_rotation, g_fps, g_encode_ms,
-                         g_pulse_ok ? "true" : "false", g_https_port);
+                         g_pulse_ok ? "true" : "false",
+                         g_use_mpp ? "mpp" : "turbo", g_fb_changes, g_frames_total,
+                         g_drm_ms, g_hash_ms, g_loop_ms, g_https_port);
         http_response(fd, ssl, 200, "application/json", body, n);
         goto cleanup;
     }
@@ -1115,6 +1391,8 @@ static void *conn_thread(void *arg) {
         client->ssl = ssl;
         client->audio = audio;
         pthread_mutex_init(&client->lock, NULL);
+        pthread_cond_init(&client->cond, NULL);
+        pthread_create(&client->sender, NULL, client_sender, client);
         client_add(client);
         if (audio) audio_client_add(client);
         ssl = NULL; /* owned by client */
@@ -1206,9 +1484,22 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--device") && i + 1 < argc) g_device = argv[++i];
         else if (!strcmp(argv[i], "--cert") && i + 1 < argc) g_cert = argv[++i];
         else if (!strcmp(argv[i], "--key") && i + 1 < argc) g_key = argv[++i];
+        else if (!strcmp(argv[i], "--encoder") && i + 1 < argc) {
+            if (strcmp(argv[++i], "turbo") == 0) g_use_mpp = -1;
+        }
     }
     signal(SIGPIPE, SIG_IGN);
     if (drm_init() < 0) return 1;
+    g_nv12 = malloc((size_t)g_raw_w * g_raw_h * 3 / 2);
+    if (g_use_mpp != -1) {
+        if (mpp_init(g_quality) != 0) {
+            fprintf(stderr, "MPP encoder init failed; using TurboJPEG\n");
+            g_use_mpp = 0;
+        }
+    } else {
+        g_use_mpp = 0;
+        printf("encoder: TurboJPEG (forced)\n");
+    }
     audio_init();
     atexit(audio_shutdown);
     g_input_fd = input_connect();

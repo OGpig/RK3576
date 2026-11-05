@@ -20,7 +20,7 @@
 10. [阶段 8：C 版实现与优化](#阶段-8c-版实现与优化)
 11. [模块逐个拆解](#模块逐个拆解)
 12. [协议、数据结构与公式](#协议数据结构与公式)
-13. [问题复盘：15 个真实故障](#问题复盘15-个真实故障)
+13. [问题复盘：18 个真实故障](#问题复盘18-个真实故障)
 14. [测试与性能度量](#测试与性能度量)
 15. [答辩速查：三分钟讲清系统](#答辩速查三分钟讲清系统)
 16. [附录：文件、命令与检查表](#附录文件命令与检查表)
@@ -595,14 +595,14 @@ Python 版功能完整，但每帧有解释器/对象/拷贝开销。C 版用来
 - 主机无 gcc/clang/交叉工具链；
 - Bootlin aarch64 是 **Linux ELF**，Windows Git Bash 不能执行；
 - 最终方案：**Zig Windows 0.13** `zig cc -target aarch64-linux-gnu`；
-- 链接板端 `libturbojpeg.so.0`、`libssl.so.3`、`libcrypto.so.3`，
-  手写最小 TurboJPEG/OpenSSL ABI 声明，不需要 dev 头文件。
+- 链接板端 `libturbojpeg.so.0`、`libssl.so.3`、`libcrypto.so.3`、`librga.so.2`、
+  GStreamer/App/GLib 库；手写最小 ABI 声明，不需要 dev 头文件。
 
 ```mermaid
 flowchart LR
     A["rkdesk_c.c"] --> B["zig cc<br/>aarch64-linux-gnu"]
-    C["board-libs/libturbojpeg.so.0<br/>libssl.so.3/libcrypto.so.3"] --> B
-    B --> D["rkdesk_c<br/>119KB ELF"]
+    C["board-libs/libturbojpeg.so.0<br/>libssl/libcrypto/librga<br/>libgstreamer/libgstapp"] --> B
+    B --> D["rkdesk_c<br/>136KB ELF"]
     D -->|scp| E["/opt/rkdesk/rkdesk_c"]
 ```
 
@@ -610,7 +610,26 @@ flowchart LR
 
 - 直接 `ioctl`，不依赖 libdrm；
 - `PRIME_HANDLE_TO_FD` + `mmap`；
-- TurboJPEG 直接读 BGRX + pitch。
+- RGA 把 BGRX+pitch 转 NV12，MPP 硬件 JPEG；TurboJPEG 兜底；
+- 每帧重查 CRTC/fb_id，跟随 Weston page flip。
+
+### 硬件 JPEG：RGA + MPP
+
+MPP `mppjpegenc` 的 caps 虽然列了 BGRx，但实测 BGRx 输入输出灰块/彩色噪声；
+NV12 输入正常。于是：
+
+1. **RGA**：`imcvtcolor_t` 把 800×1280 BGRX 转 NV12，实测 5.1ms；
+2. **MPP**：`appsrc → mppjpegenc → appsink`，q85 单帧约 7.4ms；
+3. 失败时自动回退 TurboJPEG（`--encoder turbo` 可强制）。
+
+```mermaid
+flowchart LR
+    A["DRM BGRX"] --> B["RGA imcvtcolor<br/>BGRX→NV12"]
+    B --> C["MPP mppjpegenc"]
+    C --> D["JPEG /ws"]
+    A -.->|fallback| E["TurboJPEG"]
+    E --> D
+```
 
 ### 关键优化：不在 C 里旋转
 
@@ -631,6 +650,28 @@ flowchart LR
     C --> D["浏览器 Canvas<br/>rotate 90°"]
     D --> E["显示 1280×800"]
 ```
+
+### CRTC page flip 与静态检测
+
+C 第一版只 mmap 一次 CRTC fb_id。Weston 会 page flip 到不同 buffer，结果 C 一直编码旧帧；
+加静态哈希后表现为“6 秒只有 1 帧”。修复：
+
+- 每帧 `GETCRTC`，fb_id 变化则 `GETFB/PRIME/mmap` 新 buffer；
+- 用 `fb_changes` 计数验证确实在跟随 page flip。
+
+静态检测第一版每帧对 4MB 全量 FNV，且静止分支 `usleep(1000)`，循环每秒跑几百次，
+CPU 61%。修复：
+
+- 静止时 256B 采样哈希 + `1000000/fps` 休眠；
+- 输入事件设置 `g_force_frame`，直接跳过哈希编码；
+- 静止 CPU 降到 **7.2%**，运动时约 **9.9%**。
+
+### 网络调度：最新帧邮箱
+
+- 每客户端一个 `pending` 帧 + sender 线程；
+- 采集线程 `trylock` 写入，拿不到锁就丢帧；sender 只发最新帧；
+- 慢客户端不会阻塞采集；
+- `TCP_NODELAY` + `SO_SNDBUF=512KB`，降低 Nagle 延迟。
 
 ### 输入协议
 
@@ -657,18 +698,20 @@ if (!has_clients) {
 }
 ```
 
-空闲 CPU 0%，RSS ~1 MB。
+空闲 CPU 0–1%，RSS 约 18MB（含 GStreamer）。
 
 ### 实测
 
-| 指标 | Python | C |
-| --- | --- | --- |
-| fps | 15.0 | 29.8 |
-| kbps | 807 | 1660 |
-| 帧大小 | 53.8 KB | 55.7 KB |
-| encode | 15.9 ms | 20.7 ms |
-| CPU | 64.8% | 64.3% |
-| RSS | 52 MB | 7.8 MB |
+| 指标 | Python 8088 | C Turbo | **C MPP+RGA** |
+| --- | --- | --- | --- |
+| fps | 15.0 | 26.8 | **27.6** |
+| kbps | 807 | 1282 | **1234** |
+| 帧大小 | 53.8 KB | 47.8 KB | 44.7 KB |
+| encode | 15.9 ms | 19.6 ms | **7.4 ms** |
+| CPU | 64.8% | 35.8% | **9.9%** |
+| RSS | 52 MB | 9.4 MB | 18.1 MB |
+
+C 静止（有客户端但画面不变）CPU 7.2%，只发 1 帧；无客户端约 0–1%。
 
 ---
 
@@ -853,7 +896,7 @@ sig = blake2b(mmap, digest_size=10).digest()
 
 ---
 
-## 问题复盘：15 个真实故障
+## 问题复盘：18 个真实故障
 
 ### 1. 抓屏全黑
 
@@ -970,6 +1013,33 @@ sig = blake2b(mmap, digest_size=10).digest()
 
 ---
 
+### 16. C 一直编码旧帧
+
+- **现象**：C 页面点开 Chromium 后画面仍是旧桌面；静态哈希后 6 秒只出 1 帧。
+- **定位**：加 `fb_id` 计数，发现 C 缓存的 CRTC fb 不再变化；Weston page flip 到其他 buffer。
+- **根因**：`drm_init` 只 mmap 一次 CRTC fb_id，后续没有重新 GETCRTC/GETFB/PRIME。
+- **修复**：每帧 `drm_refresh()`；fb_id 变化时重新导出 dma-buf、mmap，替换旧映射。
+- **原理**：KMS 多缓冲/page flip；scanout 的 fb_id 会轮换，缓存单个 fb 会读到旧内容。
+- **验证**：`fb_changes` 随窗口/光标更新增长，C 页面与板端一致。
+
+### 17. MPP BGRx 输入是彩色噪声
+
+- **现象**：`mppjpegenc` 直接吃 BGRx，输出灰块/彩色条纹；NV12 输入正常。
+- **定位**：用 `videotestsrc` 分别喂 BGRx/NV12，只有 NV12 的 SMPTE 彩条正确。
+- **根因**：MPP 的 BGRx caps 在该固件/版本上不可用，色彩格式实际不匹配。
+- **修复**：RGA `imcvtcolor_t` 把 BGRX→NV12 再送 MPP；TurboJPEG 兜底。
+- **原理**：硬件编码器对输入格式/stride 有隐含约束，caps 声明不等于可用。
+- **验证**：RGA 转换 5.1ms，MPP 输出颜色正确；q85 单帧约 7.4ms。
+
+### 18. C 静止时 CPU 61%
+
+- **现象**：无画面变化、仅有客户端时 C 的捕获线程仍占 61% CPU。
+- **定位**：`hash_ms=2ms`，但静止分支 `usleep(1000)`，循环每秒跑几百次。
+- **根因**：把“1ms 让出 CPU”当成帧间隔；实际应睡 `1000/fps` 毫秒。
+- **修复**：静止分支按目标帧间隔休眠；输入事件设置 `g_force_frame`，跳过哈希直接编码。
+- **原理**：忙等 + 重复哈希会把静态桌面变成 CPU 负载；事件驱动优先于轮询。
+- **验证**：静止 7.2%、运动 9.9%，静止只发 1 帧。
+
 ## 测试与性能度量
 
 ### 测试矩阵
@@ -984,7 +1054,7 @@ sig = blake2b(mmap, digest_size=10).digest()
 | 浏览器麦克风 | 无头 Edge fake device | `isSecureContext=true`，峰值 > 0 |
 | 断线恢复 | S48 restart / kill S99 | 自动重连，源恢复 |
 | 板端同步 | `verify_board.sh` | 19/19 |
-| C 版 | 8089 页面/点击 | 30fps，输入正常 |
+| C 版 | 8089 页面/点击 | 27.6fps，输入正常 |
 
 ### 度量命令
 
@@ -998,10 +1068,11 @@ ps -o pid,%cpu,rss,args -p <pid>
 
 ### 性能结论
 
-- Python：功能完整，15fps，52MB；
-- C：视频/输入/音频，30fps，7.8MB（含 TLS）；
-- 同 CPU 下 C 吞吐约为 Python 的 2 倍；
-- C 版也实现了 `/av` Pulse 音频与 HTTPS 8444；Python 仍是功能最完整的入口。
+- Python：功能完整，15fps，CPU 64.8%，RSS 52MB；
+- C MPP+RGA：27.6fps，CPU 9.9%，RSS 18.1MB；encode 7.4ms；
+- C Turbo fallback：26.8fps，CPU 35.8%，RSS 9.4MB；
+- C 静止 7.2% CPU；C 也实现了 `/av` Pulse 音频、HTTPS 8444、慢客户端邮箱；
+- Python 仍保留 HDMI 热插拔/虚拟桌面等 fallback。
 
 ---
 
@@ -1012,7 +1083,8 @@ ps -o pid,%cpu,rss,args -p <pid>
 > RK3576 是 Buildroot 精简系统，没有 VNC。我们直接从 DRM/KMS 的 CRTC
 > framebuffer 通过 dma-buf 读真实 scanout，JPEG 经 WebSocket 推到浏览器；
 > 输入用 uinput 绝对鼠标/键盘，音频用 PulseAudio monitor + 虚拟麦克风。
-> Python 版功能完整，C 版做性能对比：同 CPU 下 30fps vs 15fps，内存 7.8MB vs 52MB。
+> Python 版功能完整；C 版用 RGA+MPP 硬件 JPEG，27.6fps/CPU 9.9%/RSS 18MB，
+> 相比 Python 15fps/64.8%/52MB，CPU 约为 1/6。
 
 ### 白板顺序
 
@@ -1021,8 +1093,8 @@ ps -o pid,%cpu,rss,args -p <pid>
 3. 画输入：浏览器 → JSON → uinput → libinput → Weston；
 4. 画旋转：原生 800×1280 → rotate-90 → 逻辑 1280×800 → 逆变换公式；
 5. 画音频：sink → monitor → parec → WS → AudioContext；麦克风反向 null sink/remap；
-6. 画 C：capture thread + client threads + TurboJPEG；
-7. 说数字：15fps/52MB vs 30fps/7.8MB；音频 150–250ms。
+6. 画 C：capture → RGA→NV12 → MPP → 最新帧邮箱 → sender 线程；
+7. 说数字：Python 15fps/64.8%/52MB；C 27.6fps/9.9%/18MB；音频 150–250ms。
 
 ### 一句话总结每层
 

@@ -63,7 +63,7 @@ Weston（会关闭板端当前打开的窗口）。
   浏览器 PCM → `rkdesk_mic_source`（2s/205KB，峰值 10950）；
 - 服务强停后重启，虚拟源模块被清理、默认录音源恢复为物理麦克风；
 - HTTPS 8443 自签名证书可用，无头 Edge 中 `isSecureContext=true`，假麦克风可推流；
-- C 版 8089：30fps、q78/4:2:2、CPU 64.3%、RSS 7.8MB；Python 同条件 15fps、64.8%、52MB；
+- C 版 8089：27.6fps、MPP q85/4:2:0、CPU 9.9%、RSS 18.1MB；Python 15fps、64.8%、52MB；
   C 空闲无客户端时 0% CPU。
 
 ## 音频链路（PulseAudio 16.1）
@@ -77,21 +77,22 @@ Weston（会关闭板端当前打开的窗口）。
 - HTTPS：`deploy.sh` 用主机 `openssl` 生成带 SAN 的自签名证书到 `/opt/rkdesk/certs`，
   私钥不入库；HTTP 8088 仍保留，麦克风需 8443 或 localhost。
 
-## C 版镜像（8089）
+## C 版镜像（8089/8444，主方案候选）
 
 `RKDesk/c-src/` 是独立的板端 C 实现，用于和 Python 版对比画面吞吐：
 
-- 直接 `ioctl` DRM/KMS + dma-buf mmap，不经 libdrm；
-- 板端 `libturbojpeg.so.0` 编码 BGRX，C 里不做旋转，浏览器 GPU 旋转 90°；
-- 8089 提供独立页面、`/ws`、`/healthz`、`/api/screenshot.jpg`；
-- 输入复用 `rkdesk_input.py`（C 页面发 `move` + `button`，设备坐标由页面转换）。
+- 直接 `ioctl` DRM/KMS + dma-buf mmap，不经 libdrm；每帧跟随 page flip 重查 fb_id；
+- RGA 把 BGRX 转 NV12，MPP 硬件 JPEG；TurboJPEG 兜底；浏览器 GPU 旋转 90°；
+- 8089 页面、`/ws`、`/healthz`、`/api/screenshot.jpg`；8444 HTTPS + `/av` 音频；
+- 每客户端最新帧邮箱 + sender 线程；输入复用 `rkdesk_input.py`。
 
-构建：Zig 0.13 Windows `-target aarch64-linux-gnu`，链接板端 `libturbojpeg.so.0`；
-产物不入库（`c-src/rkdesk_c` 已 gitignore），`deploy.sh` 会把已编译产物复制到
+构建：Zig 0.13 Windows `-target aarch64-linux-gnu`，链接板端
+`libturbojpeg/librga/GStreamer/OpenSSL`；产物不入库（`c-src/rkdesk_c` 已 gitignore），
+`deploy.sh` 会把已编译产物复制到
 `/opt/rkdesk/rkdesk_c`，但**不自动启动**。
 
-实测（q78 / 4:2:2 / 6 秒拖动）：Python 15.0fps、807kbps、53.8KB/帧、CPU64.8%、RSS52MB；
-C 29.8fps、1660kbps、55.7KB/帧、CPU64.3%、RSS7.8MB；无客户端时 C 暂停编码（0% CPU）。
+实测（6 秒拖动；Python q78/4:2:2，C MPP q85/4:2:0）：Python 15.0fps、807kbps、53.8KB/帧、CPU64.8%、RSS52MB；
+C MPP 27.6fps、1234kbps、44.7KB/帧、CPU9.9%、RSS18.1MB；Turbo fallback 26.8fps/35.8%/9.4MB；静止 7.2%。
 C 音频：/av 2.4s/441KB 峰值2810；虚拟麦 2s/201KB 峰值10962；HTTPS 8444 可用。
 
 C 版已实现 Pulse 音频、虚拟麦克风（rkdesk_c_mic_source）和 HTTPS 8444；仍不处理 HDMI 热插拔/CRTC 切换。
